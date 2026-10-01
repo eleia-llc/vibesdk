@@ -5,6 +5,13 @@ declare namespace Cloudflare {
 		// Think model. Unset keeps the upstream default. Not a wrangler `vars`
 		// entry: an empty committed value would reset a dashboard override on deploy.
 		THINK_MODEL?: string;
+		// Applied only when THINK_MODEL is not in the model catalog.
+		THINK_MODEL_CONTEXT_SIZE?: string;
+		THINK_MODEL_CREDIT_COST?: string;
+		// Dev-only browser sidecar. Not production wrangler vars. Defaults live
+		// in the sidecar client when these are unset.
+		DEV_BROWSER_SIDECAR_URL?: string;
+		DEV_BROWSER_PREVIEW_ORIGIN?: string;
 		ALLOCATION_STRATEGY?: string;
 		ENABLE_ARTIFACTS?: string;
 		ENABLE_CLOUDFLARE_LIMITS?: string;

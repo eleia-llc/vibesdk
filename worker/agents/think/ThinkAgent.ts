@@ -1,5 +1,12 @@
-import { Think } from '@cloudflare/think';
-import type { PrepareStepContext, StepConfig, Session, TurnContext, TurnConfig } from '@cloudflare/think';
+import { Think, defaultContextOverflowClassifier } from '@cloudflare/think';
+import type {
+	ContextOverflowConfig,
+	PrepareStepContext,
+	StepConfig,
+	Session,
+	TurnContext,
+	TurnConfig,
+} from '@cloudflare/think';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel, ToolSet } from 'ai';
 import {
@@ -25,7 +32,10 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { resolveThinkModel } from './model-config';
+import {
+	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
+	creditCostForStoredThinkModel,
+} from './model-config';
 
 /**
  * Per-instance configuration pushed into a {@link ThinkAgent} by the host
@@ -48,6 +58,11 @@ export interface ThinkAgentConfig {
 		apiKey: string;
 		modelName: string;
 		contextSize?: number;
+		/**
+		 * Credits charged per model step. Resolved once, when the session is
+		 * created, and read by `beforeStep`. Not re-read from `THINK_MODEL`.
+		 */
+		creditCost?: number;
 		headers?: Record<string, string>;
 		/**
 		 * When true, the AI Gateway holds the provider keys (BYOK / stored
@@ -159,6 +174,41 @@ function fixToolCallStream(
  * default DO-SQLite workspace.
  */
 export class ThinkAgent extends Think<Env> {
+	/**
+	 * Compact from the context window stored at session creation. Unknown
+	 * models persist a conservative window (see model-config); using Gemini's
+	 * 1M here starts compaction after those models have already overflowed.
+	 * Headroom 0.85 triggers the proactive guard before the provider rejects
+	 * the prompt. The reactive classifier is the backstop when usage is missing.
+	 *
+	 * Installed as an accessor because `Think.contextOverflow` is a data
+	 * property, and a subclass getter is rejected by TypeScript. The accessor
+	 * replaces that property after `super()` so each step sees the session's
+	 * stored window.
+	 */
+	constructor(ctx: DurableObjectState, env: Env) {
+		super(ctx, env);
+		Object.defineProperty(this, 'contextOverflow', {
+			configurable: true,
+			enumerable: true,
+			get: () => this.contextOverflowForSession(),
+		});
+	}
+
+	private contextOverflowForSession(): ContextOverflowConfig {
+		const size = this.getConfig<ThinkAgentConfig>()?.model.contextSize;
+		const maxInputTokens =
+			typeof size === 'number' && Number.isFinite(size) && size > 0
+				? size
+				: UNKNOWN_THINK_MODEL_CONTEXT_SIZE;
+		return {
+			reactive: true,
+			proactive: { maxInputTokens, headroom: 0.85, maxCompactions: 1 },
+		};
+	}
+
+	override classifyChatError = defaultContextOverflowClassifier;
+
 	/** Step budget per turn (Think's default is 10). */
 	override maxSteps = 25;
 	/** SpaceDO has no shell; expose only the explicit file tools. */
@@ -361,7 +411,6 @@ export class ThinkAgent extends Think<Env> {
 	 * user input.
 	 */
 	override async beforeStep(ctx: PrepareStepContext): Promise<StepConfig | void> {
-		const thinkModel = resolveThinkModel(this.env.THINK_MODEL);
 		const config = this.getConfig<ThinkAgentConfig>();
 		if (this.turnUsage && config) {
 			await RateLimitService.enforceLLMCallsRateLimit(
@@ -372,7 +421,7 @@ export class ThinkAgent extends Think<Env> {
 				'',
 				false,
 				this.turnUsage.hasCloudflareConfigured,
-				{ creditCost: thinkModel.config.creditCost, throwOnExceeded: false },
+				{ creditCost: creditCostForStoredThinkModel(config.model), throwOnExceeded: false },
 			);
 		}
 		if (ctx.stepNumber >= this.maxSteps - 1) {

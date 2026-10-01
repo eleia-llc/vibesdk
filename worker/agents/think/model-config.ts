@@ -20,6 +20,27 @@ export const THINK_MODEL_CONFIG: AIModelConfig = {
 };
 
 /**
+ * Context window and credit used when `THINK_MODEL` names a provider we accept
+ * but the id is not in `AI_MODEL_CONFIG`. Gemini's 1M window and credit of 2
+ * are the wrong stand-in: compaction then waits until the prompt is near 1M,
+ * which is past the window of models such as glm-4.7 and glm-5.2, and the
+ * call is metered as a cheap flash model.
+ *
+ * 128K is the conservative window. Credit 8 is intentionally higher than the
+ * Gemini default so an unknown model is not under-metered. Override either
+ * with `THINK_MODEL_CONTEXT_SIZE` / `THINK_MODEL_CREDIT_COST`. Those vars apply
+ * only to ids missing from the catalog. The upstream default and catalog
+ * entries ignore them.
+ */
+export const UNKNOWN_THINK_MODEL_CONTEXT_SIZE = 131_072;
+export const UNKNOWN_THINK_MODEL_CREDIT_COST = 8;
+
+export interface ThinkModelLimits {
+	contextSize?: string | number | null;
+	creditCost?: string | number | null;
+}
+
+/**
  * Provider slugs accepted by AI Gateway's OpenAI-compatible
  * `/compat/chat/completions` endpoint. The model field is `{provider}/{model}`
  * (the provider is not a separate URL segment). See
@@ -97,8 +118,14 @@ export interface ResolvedThinkModel {
  *
  * Throws {@link ThinkModelConfigError} for an invalid or unsupported value.
  * Call this when the Think session is created, before any model request.
+ *
+ * `limits` overrides context and credit for ids that are not in the catalog.
+ * They are ignored for the upstream default and for catalog entries.
  */
-export function resolveThinkModel(raw: string | null | undefined): ResolvedThinkModel {
+export function resolveThinkModel(
+	raw: string | null | undefined,
+	limits?: ThinkModelLimits,
+): ResolvedThinkModel {
 	const trimmed = typeof raw === 'string' ? raw.trim() : '';
 	if (trimmed.length === 0 || trimmed === THINK_MODEL_ID) {
 		return { modelId: THINK_MODEL_ID, config: THINK_MODEL_CONFIG };
@@ -106,7 +133,40 @@ export function resolveThinkModel(raw: string | null | undefined): ResolvedThink
 
 	const modelId = normalizeWorkersAiModelId(trimmed);
 	assertValidThinkModelId(modelId, trimmed);
-	return { modelId, config: configForThinkModel(modelId) };
+	return { modelId, config: configForThinkModel(modelId, limits) };
+}
+
+/**
+ * Gateway model id for the system prompt. `modelName` is already
+ * `provider/model` for Think (including `workers-ai/@cf/...`). Prefixing the
+ * provider again produces `workers-ai/workers-ai/@cf/...`.
+ */
+export function formatThinkModelId(provider: string, modelName: string): string {
+	if (!provider || modelName === provider || modelName.startsWith(`${provider}/`)) {
+		return modelName;
+	}
+	return `${provider}/${modelName}`;
+}
+
+/**
+ * Credit stored on the session at creation. `beforeStep` must use this and
+ * must not read `env.THINK_MODEL` again. Sessions configured before
+ * `creditCost` was persisted fall back from the stored model id.
+ */
+export function creditCostForStoredThinkModel(model: {
+	modelName?: string;
+	creditCost?: number;
+}): number {
+	if (typeof model.creditCost === 'number' && Number.isFinite(model.creditCost) && model.creditCost > 0) {
+		return model.creditCost;
+	}
+	if (!model.modelName || model.modelName === THINK_MODEL_ID) {
+		return THINK_MODEL_CONFIG.creditCost;
+	}
+	if (isValidAIModel(model.modelName)) {
+		return AI_MODEL_CONFIG[model.modelName].creditCost;
+	}
+	return UNKNOWN_THINK_MODEL_CREDIT_COST;
 }
 
 function normalizeWorkersAiModelId(modelId: string): string {
@@ -116,7 +176,7 @@ function normalizeWorkersAiModelId(modelId: string): string {
 	return modelId;
 }
 
-function configForThinkModel(modelId: string): AIModelConfig {
+function configForThinkModel(modelId: string, limits?: ThinkModelLimits): AIModelConfig {
 	if (isValidAIModel(modelId)) {
 		return AI_MODEL_CONFIG[modelId];
 	}
@@ -125,9 +185,27 @@ function configForThinkModel(modelId: string): AIModelConfig {
 		name: modelId,
 		size: ModelSize.REGULAR,
 		provider,
-		creditCost: THINK_MODEL_CONFIG.creditCost,
-		contextSize: THINK_MODEL_CONFIG.contextSize,
+		creditCost: parseThinkModelLimit(limits?.creditCost, 'THINK_MODEL_CREDIT_COST')
+			?? UNKNOWN_THINK_MODEL_CREDIT_COST,
+		contextSize: parseThinkModelLimit(limits?.contextSize, 'THINK_MODEL_CONTEXT_SIZE')
+			?? UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
 	};
+}
+
+function parseThinkModelLimit(
+	raw: string | number | null | undefined,
+	name: string,
+): number | undefined {
+	if (raw == null) return undefined;
+	const text = typeof raw === 'number' ? String(raw) : raw.trim();
+	if (text.length === 0) return undefined;
+	const value = Number(text);
+	if (!Number.isFinite(value) || value <= 0) {
+		throw new ThinkModelConfigError(
+			`${name} must be a positive number. Got "${preview(text)}".`,
+		);
+	}
+	return value;
 }
 
 function assertValidThinkModelId(modelId: string, original: string): void {

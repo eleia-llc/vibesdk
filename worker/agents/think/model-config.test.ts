@@ -5,6 +5,10 @@ import {
 	THINK_MODEL_CONFIG,
 	THINK_MODEL_ID,
 	ThinkModelConfigError,
+	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
+	UNKNOWN_THINK_MODEL_CREDIT_COST,
+	creditCostForStoredThinkModel,
+	formatThinkModelId,
 	resolveThinkModel,
 } from './model-config';
 
@@ -51,8 +55,9 @@ describe('resolveThinkModel', () => {
 		const resolved = resolveThinkModel(modelId);
 		expect(resolved.modelId).toBe(modelId);
 		expect(resolved.config.provider).toBe('workers-ai');
-		expect(resolved.config.creditCost).toBe(THINK_MODEL_CONFIG.creditCost);
-		expect(resolved.config.contextSize).toBe(THINK_MODEL_CONFIG.contextSize);
+		expect(resolved.config.creditCost).toBe(UNKNOWN_THINK_MODEL_CREDIT_COST);
+		expect(resolved.config.contextSize).toBe(UNKNOWN_THINK_MODEL_CONTEXT_SIZE);
+		expect(resolved.config.contextSize).toBeLessThan(THINK_MODEL_CONFIG.contextSize);
 		expect(resolved.config.size).toBe(ModelSize.REGULAR);
 	});
 
@@ -112,6 +117,54 @@ describe('resolveThinkModel', () => {
 			expect(thrown.message).toContain('THINK_MODEL');
 			expect(thrown.message).toContain('unset');
 		}
+	});
+
+	it('lets unknown models override context and credit without touching catalog entries', () => {
+		const glm = resolveThinkModel('workers-ai/@cf/zai-org/glm-5.2', {
+			contextSize: '200000',
+			creditCost: '3',
+		});
+		expect(glm.config.contextSize).toBe(200_000);
+		expect(glm.config.creditCost).toBe(3);
+
+		const catalog = resolveThinkModel('openai/gpt-5', { contextSize: 4096, creditCost: 1 });
+		expect(catalog.config).toBe(AI_MODEL_CONFIG[AIModels.OPENAI_5]);
+
+		const upstream = resolveThinkModel(undefined, { contextSize: 4096, creditCost: 99 });
+		expect(upstream.config).toBe(THINK_MODEL_CONFIG);
+	});
+
+	it('rejects a non-positive context or credit override', () => {
+		expect(() => resolveThinkModel('@cf/zai-org/glm-4.7', { contextSize: '0' })).toThrow(
+			/THINK_MODEL_CONTEXT_SIZE/,
+		);
+		expect(() => resolveThinkModel('@cf/zai-org/glm-4.7', { creditCost: 'nope' })).toThrow(
+			/THINK_MODEL_CREDIT_COST/,
+		);
+	});
+
+	it('does not prefix a model id that already includes its provider', () => {
+		expect(formatThinkModelId('workers-ai', 'workers-ai/@cf/zai-org/glm-5.3-flash')).toBe(
+			'workers-ai/@cf/zai-org/glm-5.3-flash',
+		);
+		expect(formatThinkModelId('google-ai-studio', 'google-ai-studio/gemini-3.6-flash')).toBe(
+			'google-ai-studio/gemini-3.6-flash',
+		);
+		expect(formatThinkModelId('openai', 'gpt-5')).toBe('openai/gpt-5');
+	});
+
+	it('meters a stored session from the credit saved at creation', () => {
+		expect(creditCostForStoredThinkModel({ modelName: THINK_MODEL_ID, creditCost: 2 })).toBe(2);
+		expect(
+			creditCostForStoredThinkModel({
+				modelName: 'workers-ai/@cf/zai-org/glm-5.2',
+				creditCost: 3,
+			}),
+		).toBe(3);
+		expect(
+			creditCostForStoredThinkModel({ modelName: 'workers-ai/@cf/zai-org/glm-5.2' }),
+		).toBe(UNKNOWN_THINK_MODEL_CREDIT_COST);
+		expect(creditCostForStoredThinkModel({ modelName: AIModels.OPENAI_5 })).toBe(5);
 	});
 
 	it('names the provider fix for common mistakes', () => {

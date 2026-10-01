@@ -18,6 +18,8 @@ import { PreviewType, TemplateDetails } from 'worker/services/sandbox/sandboxTyp
 import {
 	buildSpacePreviewPath,
 	getPreviewDomain,
+	getProtocolForHost,
+	isLocalHost,
 	isSeparatePreviewDomain,
 	resolvePreviewHost,
 } from 'worker/utils/urls';
@@ -27,7 +29,7 @@ import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
-import { resolveThinkModel } from '../../think/model-config';
+import { formatThinkModelId, resolveThinkModel } from '../../think/model-config';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
@@ -222,7 +224,10 @@ export class ThinkCodingBehavior
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
-		const resolved = resolveThinkModel(this.env.THINK_MODEL);
+		const resolved = resolveThinkModel(this.env.THINK_MODEL, {
+			contextSize: this.env.THINK_MODEL_CONTEXT_SIZE,
+			creditCost: this.env.THINK_MODEL_CREDIT_COST,
+		});
 		const modelName = resolved.modelId;
 		const aiModelConfig = resolved.config;
 
@@ -279,11 +284,15 @@ export class ThinkCodingBehavior
 				apiKey: conf.apiKey,
 				modelName,
 				contextSize: aiModelConfig.contextSize,
+				creditCost: aiModelConfig.creditCost,
 				headers: Object.keys(headers).length > 0 ? headers : undefined,
 				useStoredKeys: usesStoredKeys,
 			},
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
-			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
+			previewUrl: await this.getBrowserPreviewURL(0).catch((error) => {
+				this.logger.warn('Failed to build browser preview URL', error);
+				return undefined;
+			}),
 		};
 
 		try {
@@ -303,7 +312,7 @@ export class ThinkCodingBehavior
 	 */
 	private buildSystemPrompt(modelName: string, provider: string): string {
 		return [
-			`You are powered by the model named ${modelName}. The exact model ID is ${provider}/${modelName}.`,
+			`You are powered by the model named ${modelName}. The exact model ID is ${formatThinkModelId(provider, modelName)}.`,
 			'<env>',
 			`  Platform: Cloudflare Workers (SpaceDO preview — no shell, no local filesystem)`,
 			`  Today's date: ${new Date().toDateString()}`,
@@ -373,7 +382,14 @@ export class ThinkCodingBehavior
 			return `https://${getPreviewDomain(this.env)}`;
 		}
 		const host = resolvePreviewHost(this.env, this.state.wsOrigin);
-		return `https://${host}`;
+		// Production Browser Run cannot open loopback. `DEV_BROWSER_PREVIEW_ORIGIN`
+		// is a dev sidecar setting; using it here sends the console tool to localhost.
+		if (!host || isLocalHost(host)) {
+			throw new Error(
+				'CUSTOM_DOMAIN is empty and this session has no public host. Set CUSTOM_DOMAIN to this worker\'s workers.dev hostname or a custom domain. Keep ENVIRONMENT=prod so the console tool does not rewrite the preview to DEV_BROWSER_PREVIEW_ORIGIN.',
+			);
+		}
+		return `${getProtocolForHost(host)}://${host}`;
 	}
 
 	public async getBrowserPreviewURL(previewVersionOverride?: number): Promise<string> {
