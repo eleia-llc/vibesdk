@@ -1,0 +1,91 @@
+# Bring cloudflare/vibesdk main into this fork on a branch and open a pull
+# request. This workflow never pushes to main. If sync/upstream-main cannot
+# fast-forward, it is left as-is and sync/upstream-<sha> carries the update.
+#
+# GITHUB_TOKEN cannot push a commit that creates or updates
+# .github/workflows/. The permissions: block has no workflows scope, so this
+# cannot be fixed by adding a permission. When upstream changes those files
+# and no extra credential is configured, the job keeps this fork's workflow
+# files and says so on the PR. To sync the workflow files themselves, set one
+# of these repository secrets:
+#
+# 1. UPSTREAM_SYNC_TOKEN — preferred simple option.
+#    Fine-grained PAT, repository eleia-llc/vibesdk only:
+#      Contents: Read and write
+#      Pull requests: Read and write
+#      Workflows: Read and write
+#    Classic PAT equivalent: scopes repo and workflow.
+#    A PAT is tied to a user. Prefer the GitHub App below if that user may leave.
+#
+# 2. GitHub App, which this workflow mints into an installation token when
+#    both secrets are set (the App wins over UPSTREAM_SYNC_TOKEN):
+#      UPSTREAM_SYNC_APP_ID — the App ID (not the client id)
+#      UPSTREAM_SYNC_APP_PRIVATE_KEY — the App PEM private key
+#    Install the App on eleia-llc/vibesdk with repository permissions:
+#      Contents: Read and write
+#      Pull requests: Read and write
+#      Workflows: Read and write
+#    No other secret is required. Installation tokens expire; the workflow
+#    mints a new one each run.
+#
+# PRs and pushes made with GITHUB_TOKEN do not trigger other workflows, so
+# CI does not run on a sync PR opened by the default token. A push or PR
+# opened with UPSTREAM_SYNC_TOKEN or the App token does trigger CI, because
+# that credential is not GITHUB_TOKEN. There is no permissions: setting that
+# changes this. Until one of those secrets exists, a person has to close and
+# reopen the sync PR to start CI.
+#
+# Push errors are classified. Only a real non-fast-forward publishes
+# sync/upstream-<sha>. Auth, network, and workflow-permission failures fail
+# the job instead of pretending the branch could not fast-forward.
+#
+# Actions are disabled on a new fork until someone enables them. Scheduled
+# runs also stay off until then, and they only see the workflow file that is
+# on the default branch. In the GitHub UI:
+#   1. Actions tab → "I understand my workflows, go ahead and enable them"
+#      (this also re-enables scheduled workflows on the fork).
+#   2. Settings → Actions → General → Actions permissions →
+#      "Allow all actions and reusable workflows".
+#   3. Settings → Actions → General → Workflow permissions →
+#      "Read and write permissions", and check
+#      "Allow GitHub Actions to create and approve pull requests".
+#   4. If the eleia-llc organization restricts Actions, an org owner must
+#      allow them for this repository (Organization settings → Actions).
+# Issues are disabled on this fork. Conflicts stay on the sync pull request;
+# this workflow does not open issues.
+
+name: Sync upstream
+
+on:
+  schedule:
+    # Monday 06:17 UTC. Offset from the hour to avoid schedule stampedes.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  open-sync-pr:
+    name: Open upstream sync PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open or update the sync pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_SYNC_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+          UPSTREAM_SYNC_APP_ID: ${{ secrets.UPSTREAM_SYNC_APP_ID }}
+          UPSTREAM_SYNC_APP_PRIVATE_KEY: ${{ secrets.UPSTREAM_SYNC_APP_PRIVATE_KEY }}
+        run: bash .github/scripts/sync-upstream.sh
