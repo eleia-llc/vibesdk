@@ -1257,7 +1257,8 @@ class SetupManager {
 		const thinkModel = existingVars.get('THINK_MODEL');
 		const thinkContext = existingVars.get('THINK_MODEL_CONTEXT_SIZE');
 		const thinkCredit = existingVars.get('THINK_MODEL_CREDIT_COST');
-		for (const name of ['THINK_MODEL', 'THINK_MODEL_CONTEXT_SIZE', 'THINK_MODEL_CREDIT_COST']) {
+		const thinkReasoning = existingVars.get('THINK_REASONING_EFFORT');
+		for (const name of ['THINK_MODEL', 'THINK_MODEL_CONTEXT_SIZE', 'THINK_MODEL_CREDIT_COST', 'THINK_REASONING_EFFORT']) {
 			preservedVars.delete(name);
 			workerConfigVarsToPreserve.delete(name);
 		}
@@ -1267,6 +1268,8 @@ class SetupManager {
 		content += '# Context and credit for an id that is not in the catalog. Defaults: 131072 and 8.\n';
 		content += thinkContext ? `THINK_MODEL_CONTEXT_SIZE="${thinkContext}"\n` : '#THINK_MODEL_CONTEXT_SIZE=""\n';
 		content += thinkCredit ? `THINK_MODEL_CREDIT_COST="${thinkCredit}"\n` : '#THINK_MODEL_CREDIT_COST=""\n';
+		content += '# Optional reasoning cap: low, medium, or high. Unset sends no reasoning_effort.\n';
+		content += thinkReasoning ? `THINK_REASONING_EFFORT="${thinkReasoning}"\n` : '#THINK_REASONING_EFFORT=""\n';
 		content += '\n';
 
 		// Provider specific secrets
@@ -1395,12 +1398,15 @@ class SetupManager {
 		const prodThinkModel = this.config.prodVars.THINK_MODEL;
 		const prodThinkContext = this.config.prodVars.THINK_MODEL_CONTEXT_SIZE;
 		const prodThinkCredit = this.config.prodVars.THINK_MODEL_CREDIT_COST;
+		const prodThinkReasoning = this.config.prodVars.THINK_REASONING_EFFORT;
 		content += '# Think agent model (optional). Unset keeps the upstream default.\n';
 		content += '# AI Gateway compat id. Workers AI: workers-ai/@cf/<org>/<model> or @cf/<org>/<model>\n';
 		content += prodThinkModel ? `THINK_MODEL="${prodThinkModel}"\n` : '#THINK_MODEL=""\n';
 		content += '# Context and credit for an id that is not in the catalog. Defaults: 131072 and 8.\n';
 		content += prodThinkContext ? `THINK_MODEL_CONTEXT_SIZE="${prodThinkContext}"\n` : '#THINK_MODEL_CONTEXT_SIZE=""\n';
 		content += prodThinkCredit ? `THINK_MODEL_CREDIT_COST="${prodThinkCredit}"\n` : '#THINK_MODEL_CREDIT_COST=""\n';
+		content += '# Optional reasoning cap: low, medium, or high. Unset sends no reasoning_effort.\n';
+		content += prodThinkReasoning ? `THINK_REASONING_EFFORT="${prodThinkReasoning}"\n` : '#THINK_REASONING_EFFORT=""\n';
 		content += '\n';
 
 		// Provider specific secrets

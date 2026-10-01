@@ -8,6 +8,8 @@ declare namespace Cloudflare {
 		// Applied only when THINK_MODEL is not in the model catalog.
 		THINK_MODEL_CONTEXT_SIZE?: string;
 		THINK_MODEL_CREDIT_COST?: string;
+		// low | medium | high. Unset omits reasoning_effort. Not a wrangler var.
+		THINK_REASONING_EFFORT?: string;
 		// Dev-only browser sidecar. Not production wrangler vars. Defaults live
 		// in the sidecar client when these are unset.
 		DEV_BROWSER_SIDECAR_URL?: string;

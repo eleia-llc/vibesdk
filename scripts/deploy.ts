@@ -1822,6 +1822,7 @@ class CloudflareDeploymentManager {
 			'THINK_MODEL',
 			'THINK_MODEL_CONTEXT_SIZE',
 			'THINK_MODEL_CREDIT_COST',
+			'THINK_REASONING_EFFORT',
 		];
 
 		const generatedJwtSecret = process.env.JWT_SECRET ? undefined : randomBytes(64).toString('base64url');

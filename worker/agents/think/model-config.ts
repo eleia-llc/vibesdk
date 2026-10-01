@@ -35,6 +35,14 @@ export const THINK_MODEL_CONFIG: AIModelConfig = {
 export const UNKNOWN_THINK_MODEL_CONTEXT_SIZE = 131_072;
 export const UNKNOWN_THINK_MODEL_CREDIT_COST = 8;
 
+/**
+ * Values accepted by `THINK_REASONING_EFFORT`. These are the OpenAI chat
+ * `reasoning_effort` levels Think can forward. Unset sends nothing.
+ */
+export const THINK_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
+
+export type ThinkReasoningEffort = (typeof THINK_REASONING_EFFORTS)[number];
+
 export interface ThinkModelLimits {
 	contextSize?: string | number | null;
 	creditCost?: string | number | null;
@@ -134,6 +142,57 @@ export function resolveThinkModel(
 	const modelId = normalizeWorkersAiModelId(trimmed);
 	assertValidThinkModelId(modelId, trimmed);
 	return { modelId, config: configForThinkModel(modelId, limits) };
+}
+
+const THINK_REASONING_EFFORT_SET: ReadonlySet<string> = new Set(THINK_REASONING_EFFORTS);
+
+/**
+ * Resolve `THINK_REASONING_EFFORT` once, when the Think session is created.
+ *
+ * Unset or blank returns `undefined`. `beforeTurn` then omits
+ * `providerOptions`, which is the upstream request. `low`, `medium`, and
+ * `high` are stored on the session. Any other value throws
+ * {@link ThinkModelConfigError} before a model request.
+ */
+export function resolveThinkReasoningEffort(
+	raw: string | null | undefined,
+): ThinkReasoningEffort | undefined {
+	const trimmed = typeof raw === 'string' ? raw.trim() : '';
+	if (trimmed.length === 0) return undefined;
+	if (THINK_REASONING_EFFORT_SET.has(trimmed)) {
+		return trimmed as ThinkReasoningEffort;
+	}
+	throw new ThinkModelConfigError(
+		`Invalid THINK_REASONING_EFFORT "${preview(trimmed)}": expected low, medium, or high. Leave THINK_REASONING_EFFORT unset to send no reasoning_effort.`,
+	);
+}
+
+/**
+ * AI SDK `providerOptions` key for a language model id such as `openai.chat`.
+ *
+ * Think's `getModel()` uses `@ai-sdk/openai` chat completions. That model
+ * copies `providerOptions.openai.reasoningEffort` onto the chat body field
+ * `reasoning_effort`. The key is the SDK provider id, not the AI Gateway
+ * slug (`workers-ai`, `google-ai-studio`, ...). When the language-model
+ * provider id is not `openai`, the first segment is used instead.
+ */
+export function thinkReasoningProviderOptionsKey(languageModelProvider: string): string {
+	const key = languageModelProvider.split('.')[0]?.trim() ?? '';
+	return key.length > 0 ? key : 'openai';
+}
+
+/**
+ * `providerOptions` for one turn. `undefined` means the turn config must
+ * omit the field so an unset effort matches upstream.
+ */
+export function thinkTurnProviderOptions(
+	reasoningEffort: ThinkReasoningEffort | undefined,
+	languageModelProvider: string,
+): Record<string, { reasoningEffort: ThinkReasoningEffort }> | undefined {
+	if (!reasoningEffort) return undefined;
+	return {
+		[thinkReasoningProviderOptionsKey(languageModelProvider)]: { reasoningEffort },
+	};
 }
 
 /**

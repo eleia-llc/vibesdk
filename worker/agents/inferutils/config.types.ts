@@ -337,7 +337,31 @@ const MODELS_MASTER = {
             creditCost: 8, // $0.22
             contextSize: 262144, // 256K Context
         },
-    }
+    },
+    // Workers AI GLM-5.3. Published context is 1,048,576.
+    // Credit uses the catalog baseline above (GPT-5 Mini $0.25/1M input = 1):
+    // Workers AI lists $1.40/1M input for glm-5.3 (5.6) and $0.15/1M for
+    // glm-5.3-flash (0.6). https://developers.cloudflare.com/workers-ai/platform/pricing/
+    GLM_5_3: {
+        id: 'workers-ai/@cf/zai-org/glm-5.3',
+        config: {
+            name: 'GLM 5.3',
+            size: ModelSize.LARGE,
+            provider: 'workers-ai',
+            creditCost: 5.6, // $1.40 / 1M input
+            contextSize: 1_048_576,
+        },
+    },
+    GLM_5_3_FLASH: {
+        id: 'workers-ai/@cf/zai-org/glm-5.3-flash',
+        config: {
+            name: 'GLM 5.3 Flash',
+            size: ModelSize.LITE,
+            provider: 'workers-ai',
+            creditCost: 0.6, // $0.15 / 1M input
+            contextSize: 1_048_576,
+        },
+    },
 } as const;
 
 /**

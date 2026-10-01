@@ -22,9 +22,10 @@
 	"compatibility_flags": ["nodejs_compat"],
 	// Preserve dashboard-managed vars on deploy so dashboard-only settings
 	// (e.g. ENABLE_ARTIFACTS, ENABLE_READ_REPLICAS, and THINK_MODEL) are not
-	// deleted by `wrangler deploy`. THINK_MODEL is intentionally absent from
-	// `vars`: a committed empty string would reset it on every deploy. Unset
-	// keeps Think's upstream default model. See docs/setup.md.
+	// deleted by `wrangler deploy`. THINK_MODEL and THINK_REASONING_EFFORT are
+	// intentionally absent from `vars`: a committed empty string would reset
+	// them on every deploy. Unset keeps Think's upstream default model and
+	// sends no reasoning_effort. See docs/setup.md.
 	"keep_vars": true,
 	// Treat imported `.md` files (e.g. Think agent SKILL.md) as Text modules so
 	// `wrangler deploy` can bundle markdown imports. Unlike `.txt`, `.md` has no

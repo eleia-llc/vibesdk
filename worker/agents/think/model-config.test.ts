@@ -10,6 +10,9 @@ import {
 	creditCostForStoredThinkModel,
 	formatThinkModelId,
 	resolveThinkModel,
+	resolveThinkReasoningEffort,
+	thinkReasoningProviderOptionsKey,
+	thinkTurnProviderOptions,
 } from './model-config';
 
 describe('resolveThinkModel', () => {
@@ -171,5 +174,69 @@ describe('resolveThinkModel', () => {
 		expect(() => resolveThinkModel('perplexity/sonar')).toThrow(/perplexity-ai/);
 		expect(() => resolveThinkModel('xai/grok-4')).toThrow(/grok/);
 		expect(() => resolveThinkModel('google/gemini-2.5-flash')).toThrow(/google-ai-studio/);
+	});
+
+	it('catalogues GLM 5.3 and GLM 5.3 Flash at 1M and ignores limit overrides', () => {
+		const full = resolveThinkModel('@cf/zai-org/glm-5.3', { contextSize: 4096, creditCost: 1 });
+		expect(full.modelId).toBe(AIModels.GLM_5_3);
+		expect(full.modelId).toBe('workers-ai/@cf/zai-org/glm-5.3');
+		expect(full.config).toBe(AI_MODEL_CONFIG[AIModels.GLM_5_3]);
+		expect(full.config.contextSize).toBe(1_048_576);
+		expect(full.config.creditCost).toBe(5.6);
+		expect(full.config.provider).toBe('workers-ai');
+
+		const flash = resolveThinkModel('workers-ai/@cf/zai-org/glm-5.3-flash');
+		expect(flash.modelId).toBe(AIModels.GLM_5_3_FLASH);
+		expect(flash.config).toBe(AI_MODEL_CONFIG[AIModels.GLM_5_3_FLASH]);
+		expect(flash.config.contextSize).toBe(1_048_576);
+		expect(flash.config.creditCost).toBe(0.6);
+
+		expect(creditCostForStoredThinkModel({ modelName: AIModels.GLM_5_3 })).toBe(5.6);
+		expect(creditCostForStoredThinkModel({ modelName: AIModels.GLM_5_3_FLASH })).toBe(0.6);
+	});
+});
+
+describe('resolveThinkReasoningEffort', () => {
+	it('sends nothing when unset', () => {
+		for (const raw of [undefined, null, '', '   ', '\n\t']) {
+			expect(resolveThinkReasoningEffort(raw)).toBeUndefined();
+			expect(thinkTurnProviderOptions(resolveThinkReasoningEffort(raw), 'openai.chat')).toBeUndefined();
+		}
+	});
+
+	it('accepts low, medium, and high and trims them', () => {
+		expect(resolveThinkReasoningEffort('low')).toBe('low');
+		expect(resolveThinkReasoningEffort('  medium  ')).toBe('medium');
+		expect(resolveThinkReasoningEffort('\nhigh\n')).toBe('high');
+	});
+
+	it('rejects any other value with the same configuration error as THINK_MODEL', () => {
+		for (const sample of ['max', 'none', 'minimal', 'xhigh', 'LOW', 'High', '0', 'true']) {
+			let thrown: unknown;
+			try {
+				resolveThinkReasoningEffort(sample);
+			} catch (error) {
+				thrown = error;
+			}
+			if (!(thrown instanceof ThinkModelConfigError)) {
+				throw new Error(`${sample} should throw ThinkModelConfigError`);
+			}
+			expect(thrown.message).toContain('THINK_REASONING_EFFORT');
+			expect(thrown.message).toContain('unset');
+		}
+	});
+
+	it('maps the language-model provider id onto providerOptions', () => {
+		expect(thinkReasoningProviderOptionsKey('openai.chat')).toBe('openai');
+		expect(thinkReasoningProviderOptionsKey('openai')).toBe('openai');
+		expect(thinkReasoningProviderOptionsKey('')).toBe('openai');
+		expect(thinkReasoningProviderOptionsKey('anthropic.messages')).toBe('anthropic');
+
+		expect(thinkTurnProviderOptions('medium', 'openai.chat')).toEqual({
+			openai: { reasoningEffort: 'medium' },
+		});
+		expect(thinkTurnProviderOptions('low', 'workers-ai.chat')).toEqual({
+			'workers-ai': { reasoningEffort: 'low' },
+		});
 	});
 });

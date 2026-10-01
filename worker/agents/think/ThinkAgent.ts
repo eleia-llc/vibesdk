@@ -35,6 +35,8 @@ import type { RateLimitSettings } from '../../services/rate-limit/config';
 import {
 	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
 	creditCostForStoredThinkModel,
+	thinkTurnProviderOptions,
+	type ThinkReasoningEffort,
 } from './model-config';
 
 /**
@@ -63,6 +65,12 @@ export interface ThinkAgentConfig {
 		 * created, and read by `beforeStep`. Not re-read from `THINK_MODEL`.
 		 */
 		creditCost?: number;
+		/**
+		 * `THINK_REASONING_EFFORT`, resolved once when the session is created.
+		 * Absent when the var is unset. `beforeTurn` reads this and does not
+		 * re-read the env var.
+		 */
+		reasoningEffort?: ThinkReasoningEffort;
 		headers?: Record<string, string>;
 		/**
 		 * When true, the AI Gateway holds the provider keys (BYOK / stored
@@ -358,10 +366,20 @@ export class ThinkAgent extends Think<Env> {
 		console.info('Think context selected', {
 			model: config?.model.modelName,
 			contextSize: config?.model.contextSize,
+			reasoningEffort: config?.model.reasoningEffort,
 			originalMessageCount: ctx.messages.length,
 			selectedMessageCount: messages.length,
 		});
-		return { messages };
+		const reasoningEffort = config?.model.reasoningEffort;
+		if (!reasoningEffort) return { messages };
+		// `@ai-sdk/openai` chat reads `providerOptions.openai.reasoningEffort`
+		// into `reasoning_effort`. The key follows the language-model provider
+		// id (`openai.chat` today). A string model id has no provider, so the
+		// key stays `openai`.
+		const model = this.getModel();
+		const provider = typeof model === 'string' ? 'openai' : model.provider;
+		const providerOptions = thinkTurnProviderOptions(reasoningEffort, provider);
+		return providerOptions ? { messages, providerOptions } : { messages };
 	}
 
 	override getSkills(): SkillSource[] {

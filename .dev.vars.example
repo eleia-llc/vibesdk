@@ -59,6 +59,9 @@
 # Ignored for the Gemini default and for catalog models. Defaults: 131072 and 8.
 #THINK_MODEL_CONTEXT_SIZE="131072"
 #THINK_MODEL_CREDIT_COST="8"
+# Optional. low, medium, or high. Unset sends no reasoning_effort.
+# Set this with workers-ai/@cf/zai-org/glm-5.3; otherwise that model reasons without a cap.
+#THINK_REASONING_EFFORT="medium"
 # Dev-only. The production worker does not use these. Browser Run cannot open localhost.
 #DEV_BROWSER_SIDECAR_URL="http://127.0.0.1:9223"
 #DEV_BROWSER_PREVIEW_ORIGIN="http://localhost:5173"

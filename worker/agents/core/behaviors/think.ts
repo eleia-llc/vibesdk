@@ -29,7 +29,7 @@ import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
-import { formatThinkModelId, resolveThinkModel } from '../../think/model-config';
+import { formatThinkModelId, resolveThinkModel, resolveThinkReasoningEffort } from '../../think/model-config';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
@@ -216,9 +216,10 @@ export class ThinkCodingBehavior
 	 * Resolve the AI Gateway model coordinates and push them (plus space name
 	 * + system prompt) into the ThinkAgent DO.
 	 *
-	 * `THINK_MODEL` is validated here, before any gateway or model request.
-	 * An invalid value throws and fails session creation. Unset keeps the
-	 * upstream default.
+	 * `THINK_MODEL` and `THINK_REASONING_EFFORT` are validated here, before
+	 * any gateway or model request. An invalid value throws and fails session
+	 * creation. Unset model keeps the upstream default. Unset reasoning
+	 * effort stores nothing, so the request omits `reasoning_effort`.
 	 */
 	private async configureThinkAgent(): Promise<void> {
 		const inf = this.getInferenceContext();
@@ -228,6 +229,7 @@ export class ThinkCodingBehavior
 			contextSize: this.env.THINK_MODEL_CONTEXT_SIZE,
 			creditCost: this.env.THINK_MODEL_CREDIT_COST,
 		});
+		const reasoningEffort = resolveThinkReasoningEffort(this.env.THINK_REASONING_EFFORT);
 		const modelName = resolved.modelId;
 		const aiModelConfig = resolved.config;
 
@@ -285,6 +287,7 @@ export class ThinkCodingBehavior
 				modelName,
 				contextSize: aiModelConfig.contextSize,
 				creditCost: aiModelConfig.creditCost,
+				...(reasoningEffort ? { reasoningEffort } : {}),
 				headers: Object.keys(headers).length > 0 ? headers : undefined,
 				useStoredKeys: usesStoredKeys,
 			},
