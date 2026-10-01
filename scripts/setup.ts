@@ -1253,6 +1253,15 @@ class SetupManager {
 		}
 		content += '\n';
 
+		// Optional. Unset keeps Think on the upstream default model.
+		const thinkModel = existingVars.get('THINK_MODEL');
+		preservedVars.delete('THINK_MODEL');
+		workerConfigVarsToPreserve.delete('THINK_MODEL');
+		content += '# Think agent model (optional). Unset keeps the upstream default.\n';
+		content += '# AI Gateway compat id. Workers AI: workers-ai/@cf/<org>/<model> or @cf/<org>/<model>\n';
+		content += thinkModel ? `THINK_MODEL="${thinkModel}"\n` : '#THINK_MODEL=""\n';
+		content += '\n';
+
 		// Provider specific secrets
 		content += '# Provider specific secrets\n';
 		const providerVars = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_AI_STUDIO_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY'];
@@ -1374,6 +1383,12 @@ class SetupManager {
 		if (this.config.aiGatewayUrl) {
 			content += `CLOUDFLARE_AI_GATEWAY_URL="${this.config.aiGatewayUrl}"\n`;
 		}
+		content += '\n';
+
+		const prodThinkModel = this.config.prodVars.THINK_MODEL;
+		content += '# Think agent model (optional). Unset keeps the upstream default.\n';
+		content += '# AI Gateway compat id. Workers AI: workers-ai/@cf/<org>/<model> or @cf/<org>/<model>\n';
+		content += prodThinkModel ? `THINK_MODEL="${prodThinkModel}"\n` : '#THINK_MODEL=""\n';
 		content += '\n';
 
 		// Provider specific secrets

@@ -50,6 +50,12 @@
 # AI Gateway URL Override (Leave as-is if not going to set it)
 #CLOUDFLARE_AI_GATEWAY_URL=""
 
+# Think agent model (optional). Leave unset to keep the upstream default
+# (google-ai-studio/gemini-3.6-flash). Value is an AI Gateway OpenAI-compatible
+# model id: <provider>/<model>. Workers AI through the gateway, either form:
+#THINK_MODEL="workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+#THINK_MODEL="@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+
 # Cloudflare API Key and Account ID. This is important
 # CLOUDFLARE_API_TOKEN=""
 # CLOUDFLARE_ACCOUNT_ID=""

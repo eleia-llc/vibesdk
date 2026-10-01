@@ -10,6 +10,7 @@
 - `@cloudflare/worker-bundler` builds committed project files, and a Worker Loader binding loads them as a Dynamic Worker preview.
 - Generated apps export an `App` Durable Object class that SpaceDO hosts as a Facet with isolated SQLite storage.
 - AI Gateway routes configured model providers and provides centralized observability and caching.
+- Think's model comes from the `THINK_MODEL` var (an AI Gateway `provider/model` id, including `workers-ai/@cf/...`). When the var is unset, Think keeps its built-in default. It does not read `AGENT_CONFIG`.
 
 SpaceDO is the workspace and file layer. For Artifacts-backed spaces, Cloudflare Artifacts is the git and history layer; SQL-backed spaces retain local git history in SQLite. Do not describe SpaceDO itself as git-backed.
 

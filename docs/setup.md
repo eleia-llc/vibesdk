@@ -136,6 +136,14 @@ The setup script offers multiple AI providers with intelligent multi-selection:
 - **Manual config.ts editing required** for all model configurations
 - Model names must follow `<provider-name>/<model-name>` format
 
+**Think agent (`THINK_MODEL`):**
+- Think does not read `AGENT_CONFIG` in `worker/agents/inferutils/config.ts`. Its model is the `THINK_MODEL` var.
+- Leave it unset to keep the upstream default, `google-ai-studio/gemini-3.6-flash`.
+- Set an AI Gateway OpenAI-compatible id, `<provider>/<model>` (for example `openai/gpt-5-mini`, `google-ai-studio/gemini-3-flash-preview`, `grok/grok-4`, `anthropic/claude-sonnet-4-5`, `dynamic/customer-support`, or `custom-<slug>/<model>`).
+- Workers AI goes through the same gateway endpoint. Use `workers-ai/@cf/<org>/<model>` or the shorthand `@cf/<org>/<model>` (also `@hf/...`). Example: `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`. The model must support function calling; Think's tool loop speaks OpenAI chat completions.
+- An invalid value or an unsupported provider fails when the Think session is created, before any generation request. The error names `THINK_MODEL` and the supported providers.
+- Do not put `THINK_MODEL` in `wrangler.jsonc`. `keep_vars` preserves a dashboard variable, and a committed empty string would clear it on deploy. Set it as a plain-text variable in the Cloudflare dashboard, in `.dev.vars` for local development, or in `.prod.vars` so `bun run deploy` uploads it. Use only one of the dashboard variable or the secret, not both: Cloudflare rejects a duplicate name.
+
 ### OAuth Configuration
 
 The script will also ask for OAuth credentials:
@@ -216,6 +224,7 @@ Feature settings are intentionally omitted from the committed wrangler `vars`. F
 | `ALLOCATION_STRATEGY` | Selects the legacy sandbox allocation strategy | Default strategy | Managed in the dashboard rather than through production secrets. |
 | `USE_CLOUDFLARE_IMAGES` | Enables Cloudflare Images uploads | Off | Set a non-empty value to enable. |
 | `USE_TUNNEL_FOR_PREVIEW` | Uses a tunnel for local previews | Off | Dev-only; set in `.dev.vars`, not the production dashboard. |
+| `THINK_MODEL` | Selects the Think agent model routed through AI Gateway | Upstream default `google-ai-studio/gemini-3.6-flash` | `<provider>/<model>`, or `workers-ai/@cf/<org>/<model>` / `@cf/<org>/<model>`. Invalid values fail at Think session creation. See [Think agent model](#important-model-configuration-notes). |
 
 Existing deployments retain previously configured dashboard values when this configuration is deployed. New deployments must explicitly set `ENABLE_READ_REPLICAS="true"` or `ENABLE_CLOUDFLARE_LIMITS="true"` in the dashboard to preserve the former committed defaults.
 

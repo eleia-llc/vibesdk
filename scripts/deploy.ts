@@ -1785,6 +1785,7 @@ class CloudflareDeploymentManager {
 			'DISPATCH_NAMESPACE',
 			'ENVIRONMENT',
 			'PLATFORM_MODEL_PROVIDERS',
+			'THINK_MODEL',
 		];
 
 		const generatedJwtSecret = process.env.JWT_SECRET ? undefined : randomBytes(64).toString('base64url');

@@ -25,7 +25,7 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { THINK_MODEL_CONFIG } from './model-config';
+import { resolveThinkModel } from './model-config';
 
 /**
  * Per-instance configuration pushed into a {@link ThinkAgent} by the host
@@ -37,10 +37,11 @@ export interface ThinkAgentConfig {
 	/** Owner — used for usage attribution / logging. */
 	userId: string;
 	/**
-	 * Fully-resolved model coordinates. The behavior computes these from the
-	 * user's `ModelConfig` + AGENT_CONFIG via `getConfigurationForModel`, so
-	 * `getModel()` here is a thin `@ai-sdk/openai` provider over the same
-	 * AI Gateway `/compat` endpoint the rest of the platform uses.
+	 * Fully-resolved model coordinates. The host behavior resolves `THINK_MODEL`
+	 * (or the upstream default when that var is unset) through
+	 * `getConfigurationForModel`, so `getModel()` here is a thin `@ai-sdk/openai`
+	 * provider over the same AI Gateway `/compat` endpoint the rest of the
+	 * platform uses.
 	 */
 	model: {
 		baseURL: string;
@@ -360,6 +361,7 @@ export class ThinkAgent extends Think<Env> {
 	 * user input.
 	 */
 	override async beforeStep(ctx: PrepareStepContext): Promise<StepConfig | void> {
+		const thinkModel = resolveThinkModel(this.env.THINK_MODEL);
 		const config = this.getConfig<ThinkAgentConfig>();
 		if (this.turnUsage && config) {
 			await RateLimitService.enforceLLMCallsRateLimit(
@@ -370,7 +372,7 @@ export class ThinkAgent extends Think<Env> {
 				'',
 				false,
 				this.turnUsage.hasCloudflareConfigured,
-				{ creditCost: THINK_MODEL_CONFIG.creditCost, throwOnExceeded: false },
+				{ creditCost: thinkModel.config.creditCost, throwOnExceeded: false },
 			);
 		}
 		if (ctx.stepNumber >= this.maxSteps - 1) {

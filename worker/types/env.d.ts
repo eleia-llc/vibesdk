@@ -2,6 +2,9 @@ declare namespace Cloudflare {
 	interface Env {
 		// Dashboard-managed settings are intentionally omitted from wrangler vars.
 		ALLOWED_EMAIL?: string;
+		// Think model. Unset keeps the upstream default. Not a wrangler `vars`
+		// entry: an empty committed value would reset a dashboard override on deploy.
+		THINK_MODEL?: string;
 		ALLOCATION_STRATEGY?: string;
 		ENABLE_ARTIFACTS?: string;
 		ENABLE_CLOUDFLARE_LIMITS?: string;
