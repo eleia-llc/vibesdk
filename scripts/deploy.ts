@@ -20,7 +20,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parse, modify, applyEdits } from 'jsonc-parser';
 import Cloudflare from 'cloudflare';
-import { resolveProdSecretValue } from '../worker/utils/urls';
+import { omitBlankPlatformDomainVars, resolveProdSecretValue } from '../worker/utils/urls';
 
 // Get current directory for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -1635,6 +1635,39 @@ class CloudflareDeploymentManager {
 	}
 
 	/**
+	 * Drops a blank CUSTOM_DOMAIN / CUSTOM_PREVIEW_DOMAIN from the wrangler file
+	 * for this deploy. `keep_vars: true` then leaves a dashboard value in place.
+	 * The local file is restored afterwards.
+	 */
+	private omitBlankDomainVarsFromWrangler(): Record<string, string> | null {
+		try {
+			const { content, config } = this.readWranglerConfig();
+			const currentVars = { ...(config.vars || {}) } as Record<string, unknown>;
+			const { vars, omitted } = omitBlankPlatformDomainVars(currentVars);
+			if (Object.keys(omitted).length === 0) {
+				return null;
+			}
+
+			console.log(
+				`ℹ️  Not deploying blank ${Object.keys(omitted).join(', ')}. keep_vars will preserve a dashboard value.`,
+			);
+			const edits = modify(
+				content,
+				['vars'],
+				vars,
+				CloudflareDeploymentManager.JSONC_FORMAT_OPTIONS,
+			);
+			this.writeWranglerConfig(applyEdits(content, edits));
+			return omitted;
+		} catch (error) {
+			this.logWarning(
+				`Could not omit blank domain vars: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return null;
+		}
+	}
+
+	/**
 	 * Temporarily removes conflicting vars from wrangler.jsonc before deployment
 	 * Returns the original vars for restoration later
 	 */
@@ -1787,6 +1820,8 @@ class CloudflareDeploymentManager {
 			'ENVIRONMENT',
 			'PLATFORM_MODEL_PROVIDERS',
 			'THINK_MODEL',
+			'THINK_MODEL_CONTEXT_SIZE',
+			'THINK_MODEL_CREDIT_COST',
 		];
 
 		const generatedJwtSecret = process.env.JWT_SECRET ? undefined : randomBytes(64).toString('base64url');
@@ -2124,9 +2159,15 @@ class CloudflareDeploymentManager {
 			console.log('\n📋 Step 3: Creating .prod.vars and resolving var/secret conflicts...');
 			this.createProdVarsFile();
 			const conflictingVars = await this.removeConflictingVars();
-			
+			const omittedDomainVars = this.omitBlankDomainVarsFromWrangler();
+			const varsToRestore: Record<string, string> = {
+				...(omittedDomainVars ?? {}),
+				...(conflictingVars ?? {}),
+			};
+			const restoreVars = Object.keys(varsToRestore).length > 0 ? varsToRestore : null;
+
 			// Store for potential cleanup on early exit
-			this.conflictingVarsForCleanup = conflictingVars;
+			this.conflictingVarsForCleanup = restoreVars;
 
 			// Steps 2-4: Run all setup operations in parallel
 			const operations: Promise<void>[] = [
@@ -2179,7 +2220,7 @@ class CloudflareDeploymentManager {
 			} finally {
 				// Step 7: Always restore original vars (even if deployment failed)
 				console.log('\n📋 Step 7: Restoring original configuration...');
-				await this.restoreOriginalVars(conflictingVars);
+				await this.restoreOriginalVars(restoreVars);
 				this.restoreArtifactsBinding();
 				
 				// Clear the backup since we've restored
@@ -2196,9 +2237,21 @@ class CloudflareDeploymentManager {
 				console.log(
 					`\n🎉 Complete deployment finished successfully in ${duration}s!`,
 				);
-				console.log(
-					`✅ Your Cloudflare Orange Build platform is now live at https://${customDomain}! 🚀`,
-				);
+				if (customDomain) {
+					console.log(
+						`✅ Your Cloudflare Orange Build platform is now live at https://${customDomain}! 🚀`,
+					);
+				} else {
+					console.log(
+						'✅ Deployed without a custom domain. An empty CUSTOM_DOMAIN in wrangler.jsonc was not uploaded, so a dashboard value is kept.',
+					);
+					console.log(
+						'   With CUSTOM_DOMAIN unset, https://<worker>.<account>.workers.dev serves the platform.',
+					);
+					console.log(
+						'   The Think console tool gets HTTP 403 on workers.dev (Browser Run is blocked there). Set CUSTOM_DOMAIN to a hostname you control for that tool.',
+					);
+				}
 				
 				// Restore ARM64 flags for continued local development
 				if (originalDockerfileContent) {

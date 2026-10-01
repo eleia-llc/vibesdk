@@ -238,11 +238,12 @@
             },
             "version": "1.0.0"
         },
+        // Blank on purpose. `bun run deploy` omits an empty value so keep_vars
+        // preserves a dashboard CUSTOM_DOMAIN. At runtime an empty value serves
+        // this worker's *.workers.dev host instead of failing every request.
         "CUSTOM_DOMAIN": "",
         "MAX_SANDBOX_INSTANCES": "10",
-        "SANDBOX_INSTANCE_TYPE": "standard-3",
-        "DEV_BROWSER_SIDECAR_URL": "http://127.0.0.1:9223",
-        "DEV_BROWSER_PREVIEW_ORIGIN": "http://localhost:5173"
+        "SANDBOX_INSTANCE_TYPE": "standard-3"
     },
 	"workers_dev": false,
 	"preview_urls": false
