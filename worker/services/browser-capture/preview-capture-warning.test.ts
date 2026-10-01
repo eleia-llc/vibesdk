@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { localPreviewCaptureBlock, previewCaptureWarning } from './preview-capture-warning';
+import { deployDevBrowserConsoleWarning, localPreviewCaptureBlock, previewCaptureWarning } from './preview-capture-warning';
 
 describe('preview capture warnings', () => {
 	it('blocks loopback previews before Browser Run launches', () => {
@@ -27,5 +27,18 @@ describe('preview capture warnings', () => {
 			{ url: 'https://cdn.example/asset.js', failure: 'HTTP 403', status: 403 },
 		]);
 		expect(unrelated).toBeUndefined();
+	});
+
+	it('warns about the console only when a dev browser var is set', () => {
+		expect(deployDevBrowserConsoleWarning({}, undefined)).toBeUndefined();
+		expect(deployDevBrowserConsoleWarning({ DEV_BROWSER_PREVIEW_ORIGIN: '   ' })).toBeUndefined();
+		const warning = deployDevBrowserConsoleWarning(
+			{ DEV_BROWSER_PREVIEW_ORIGIN: 'http://localhost:5173' },
+			{ DEV_BROWSER_SIDECAR_URL: '' },
+		);
+		expect(warning).toContain('DEV_BROWSER_PREVIEW_ORIGIN');
+		expect(warning).toContain('403');
+		expect(deployDevBrowserConsoleWarning({ DEV_BROWSER_SIDECAR_URL: 'http://127.0.0.1:9223' }))
+			.toContain('DEV_BROWSER_SIDECAR_URL');
 	});
 });

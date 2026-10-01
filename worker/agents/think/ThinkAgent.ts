@@ -34,6 +34,7 @@ import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker'
 import type { RateLimitSettings } from '../../services/rate-limit/config';
 import {
 	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
+	contextSizeForStoredThinkModel,
 	creditCostForStoredThinkModel,
 	thinkTurnProviderOptions,
 	type ThinkReasoningEffort,
@@ -204,11 +205,10 @@ export class ThinkAgent extends Think<Env> {
 	}
 
 	private contextOverflowForSession(): ContextOverflowConfig {
-		const size = this.getConfig<ThinkAgentConfig>()?.model.contextSize;
-		const maxInputTokens =
-			typeof size === 'number' && Number.isFinite(size) && size > 0
-				? size
-				: UNKNOWN_THINK_MODEL_CONTEXT_SIZE;
+		const model = this.getConfig<ThinkAgentConfig>()?.model;
+		const maxInputTokens = model
+			? contextSizeForStoredThinkModel(model)
+			: UNKNOWN_THINK_MODEL_CONTEXT_SIZE;
 		return {
 			reactive: true,
 			proactive: { maxInputTokens, headroom: 0.85, maxCompactions: 1 },
@@ -365,7 +365,7 @@ export class ThinkAgent extends Think<Env> {
 		}
 		console.info('Think context selected', {
 			model: config?.model.modelName,
-			contextSize: config?.model.contextSize,
+			contextSize: config?.model ? contextSizeForStoredThinkModel(config.model) : undefined,
 			reasoningEffort: config?.model.reasoningEffort,
 			originalMessageCount: ctx.messages.length,
 			selectedMessageCount: messages.length,

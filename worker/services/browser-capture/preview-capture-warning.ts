@@ -30,6 +30,23 @@ function hostnameOf(raw: string): string | undefined {
 	}
 }
 
+const DEV_BROWSER_VAR_NAMES = ['DEV_BROWSER_PREVIEW_ORIGIN', 'DEV_BROWSER_SIDECAR_URL'] as const;
+
+/**
+ * Deploy-summary warning. Printed only when a dev browser var is actually
+ * set; an empty production deploy does not mention the console 403.
+ */
+export function deployDevBrowserConsoleWarning(
+	...sources: Array<Record<string, string | undefined> | undefined>
+): string | undefined {
+	const set = DEV_BROWSER_VAR_NAMES.filter((name) => sources.some((source) => {
+		const value = source?.[name];
+		return typeof value === 'string' && value.trim().length > 0;
+	}));
+	if (set.length === 0) return undefined;
+	return `${set.join(' and ')} is set. Those variables are only for local \`bun run dev\` plus \`bun run dev:browser\`. In production they point the Think console tool at a loopback sidecar, and the preview then fails (HTTP 403 on workers.dev, or a host Browser Run cannot open). Delete them under Workers → Settings → Variables and keep ENVIRONMENT=prod.`;
+}
+
 /** Returned instead of launching Browser Run when the URL is loopback. */
 export function localPreviewCaptureBlock(url: string): string | undefined {
 	const host = hostnameOf(url);

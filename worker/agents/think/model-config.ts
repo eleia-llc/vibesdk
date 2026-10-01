@@ -1,5 +1,6 @@
 import {
 	AI_MODEL_CONFIG,
+	AIModels,
 	isValidAIModel,
 	ModelSize,
 	type AIModelConfig,
@@ -120,7 +121,10 @@ export interface ResolvedThinkModel {
  *   {@link THINK_MODEL_CONFIG} (same object).
  * - `@cf/...` and `@hf/...` are Workers AI ids. They are normalized to
  *   `workers-ai/@cf/...` so the existing AI Gateway `/compat` request can
- *   route them. `workers-ai/@cf/...` is accepted as-is.
+ *   route them. A repeated `workers-ai/` prefix is collapsed, and `@cf` /
+ *   `@hf` / the `workers-ai` prefix are matched without regard to case.
+ *   The catalog lookup uses that normalized id, then a case-insensitive
+ *   match, and returns the catalog's own id.
  * - Any other value must be `{provider}/{model}` for a provider on the
  *   OpenAI-compatible endpoint, or `custom-{slug}/{model}`.
  *
@@ -134,12 +138,16 @@ export function resolveThinkModel(
 	raw: string | null | undefined,
 	limits?: ThinkModelLimits,
 ): ResolvedThinkModel {
-	const trimmed = typeof raw === 'string' ? raw.trim() : '';
+	const trimmed = typeof raw === 'string' ? unwrapQuotes(raw.trim()) : '';
 	if (trimmed.length === 0 || trimmed === THINK_MODEL_ID) {
 		return { modelId: THINK_MODEL_ID, config: THINK_MODEL_CONFIG };
 	}
 
-	const modelId = normalizeWorkersAiModelId(trimmed);
+	const modelId = normalizeThinkModelId(trimmed);
+	const catalogId = catalogModelId(modelId);
+	if (catalogId) {
+		return { modelId: catalogId, config: AI_MODEL_CONFIG[catalogId] };
+	}
 	assertValidThinkModelId(modelId, trimmed);
 	return { modelId, config: configForThinkModel(modelId, limits) };
 }
@@ -208,31 +216,81 @@ export function formatThinkModelId(provider: string, modelName: string): string 
 }
 
 /**
- * Credit stored on the session at creation. `beforeStep` must use this and
- * must not read `env.THINK_MODEL` again. Sessions configured before
- * `creditCost` was persisted fall back from the stored model id.
+ * Credit for a stored session. Does not re-read `env.THINK_MODEL`.
+ * A catalog match uses the catalog credit, including a session that stored
+ * the unknown-model default before the id was catalogued. Other ids keep
+ * the credit saved at creation.
  */
 export function creditCostForStoredThinkModel(model: {
 	modelName?: string;
 	creditCost?: number;
 }): number {
+	const catalogId = model.modelName ? catalogModelId(normalizeThinkModelId(model.modelName)) : undefined;
+	if (catalogId) return AI_MODEL_CONFIG[catalogId].creditCost;
 	if (typeof model.creditCost === 'number' && Number.isFinite(model.creditCost) && model.creditCost > 0) {
 		return model.creditCost;
 	}
 	if (!model.modelName || model.modelName === THINK_MODEL_ID) {
 		return THINK_MODEL_CONFIG.creditCost;
 	}
-	if (isValidAIModel(model.modelName)) {
-		return AI_MODEL_CONFIG[model.modelName].creditCost;
-	}
 	return UNKNOWN_THINK_MODEL_CREDIT_COST;
 }
 
-function normalizeWorkersAiModelId(modelId: string): string {
-	if (modelId.startsWith('@cf/') || modelId.startsWith('@hf/')) {
-		return `workers-ai/${modelId}`;
+/**
+ * Context window for a session that already stored a model id. A catalog
+ * match wins over a previously stored unknown-model window (131072), so
+ * adding `workers-ai/@cf/zai-org/glm-5.3` to the catalog takes effect
+ * without a new app. Unknown ids keep the stored override.
+ */
+export function contextSizeForStoredThinkModel(model: {
+	modelName?: string;
+	contextSize?: number;
+}): number {
+	const catalogId = model.modelName ? catalogModelId(normalizeThinkModelId(model.modelName)) : undefined;
+	if (catalogId) return AI_MODEL_CONFIG[catalogId].contextSize;
+	if (!model.modelName || model.modelName === THINK_MODEL_ID) {
+		return THINK_MODEL_CONFIG.contextSize;
 	}
-	return modelId;
+	if (typeof model.contextSize === 'number' && Number.isFinite(model.contextSize) && model.contextSize > 0) {
+		return model.contextSize;
+	}
+	return UNKNOWN_THINK_MODEL_CONTEXT_SIZE;
+}
+
+function unwrapQuotes(value: string): string {
+	if (value.length < 2) return value;
+	const quote = value[0];
+	if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
+		return value.slice(1, -1).trim();
+	}
+	return value;
+}
+
+const WORKERS_AI_PREFIX = /^(?:workers[-_]?ai\/)+/i;
+
+/**
+ * Canonical gateway id before the catalog lookup.
+ * Collapses a repeated Workers AI prefix, accepts `@cf` / `@hf` in any
+ * case, and lowercases only that prefix. The rest of the model id keeps
+ * its case so an unknown id is not rewritten before validation.
+ */
+export function normalizeThinkModelId(modelId: string): string {
+	let id = modelId.trim();
+	id = id.replace(WORKERS_AI_PREFIX, 'workers-ai/');
+	if (/^@(?:cf|hf)\//i.test(id)) {
+		id = `workers-ai/${id}`;
+	}
+	id = id.replace(/^workers-ai\/@(cf|hf)\//i, (_match, scope: string) => `workers-ai/@${scope.toLowerCase()}/`);
+	return id;
+}
+
+function catalogModelId(modelId: string): AIModels | undefined {
+	if (isValidAIModel(modelId)) return modelId;
+	const folded = modelId.toLowerCase();
+	for (const candidate of Object.values(AIModels)) {
+		if (candidate.toLowerCase() === folded) return candidate;
+	}
+	return undefined;
 }
 
 function configForThinkModel(modelId: string, limits?: ThinkModelLimits): AIModelConfig {

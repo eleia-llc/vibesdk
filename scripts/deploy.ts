@@ -20,6 +20,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parse, modify, applyEdits } from 'jsonc-parser';
 import Cloudflare from 'cloudflare';
+import { deployDevBrowserConsoleWarning } from '../worker/services/browser-capture/preview-capture-warning';
 import { omitBlankPlatformDomainVars, resolveProdSecretValue } from '../worker/utils/urls';
 
 // Get current directory for ES modules
@@ -2249,9 +2250,10 @@ class CloudflareDeploymentManager {
 					console.log(
 						'   With CUSTOM_DOMAIN unset, https://<worker>.<account>.workers.dev serves the platform.',
 					);
-					console.log(
-						'   The Think console tool gets HTTP 403 on workers.dev (Browser Run is blocked there). Set CUSTOM_DOMAIN to a hostname you control for that tool.',
-					);
+				}
+				const devBrowserWarning = deployDevBrowserConsoleWarning(process.env, this.config.vars);
+				if (devBrowserWarning) {
+					console.warn(`   ${devBrowserWarning}`);
 				}
 				
 				// Restore ARM64 flags for continued local development

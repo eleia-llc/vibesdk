@@ -7,6 +7,7 @@ import {
 	ThinkModelConfigError,
 	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
 	UNKNOWN_THINK_MODEL_CREDIT_COST,
+	contextSizeForStoredThinkModel,
 	creditCostForStoredThinkModel,
 	formatThinkModelId,
 	resolveThinkModel,
@@ -193,6 +194,38 @@ describe('resolveThinkModel', () => {
 
 		expect(creditCostForStoredThinkModel({ modelName: AIModels.GLM_5_3 })).toBe(5.6);
 		expect(creditCostForStoredThinkModel({ modelName: AIModels.GLM_5_3_FLASH })).toBe(0.6);
+	});
+
+	it('resolves the exact THINK_MODEL env value workers-ai/@cf/zai-org/glm-5.3 to 1M and credit 5.6', () => {
+		const resolved = resolveThinkModel('workers-ai/@cf/zai-org/glm-5.3', {
+			contextSize: '131072',
+			creditCost: '8',
+		});
+		expect(resolved.modelId).toBe('workers-ai/@cf/zai-org/glm-5.3');
+		expect(resolved.config).toBe(AI_MODEL_CONFIG[AIModels.GLM_5_3]);
+		expect(resolved.config.contextSize).toBe(1_048_576);
+		expect(resolved.config.creditCost).toBe(5.6);
+
+		for (const raw of [
+			'Workers-AI/@cf/zai-org/glm-5.3',
+			'workers-ai/@CF/zai-org/GLM-5.3',
+			'workers-ai/workers-ai/@cf/zai-org/glm-5.3',
+			'"workers-ai/@cf/zai-org/glm-5.3"',
+		]) {
+			const variant = resolveThinkModel(raw);
+			expect(variant.modelId).toBe('workers-ai/@cf/zai-org/glm-5.3');
+			expect(variant.config.contextSize).toBe(1_048_576);
+			expect(variant.config.creditCost).toBe(5.6);
+		}
+
+		expect(contextSizeForStoredThinkModel({
+			modelName: 'workers-ai/@cf/zai-org/glm-5.3',
+			contextSize: 131_072,
+		})).toBe(1_048_576);
+		expect(creditCostForStoredThinkModel({
+			modelName: 'workers-ai/@cf/zai-org/glm-5.3',
+			creditCost: 8,
+		})).toBe(5.6);
 	});
 });
 
