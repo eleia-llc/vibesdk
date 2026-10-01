@@ -1,5 +1,12 @@
-import { Think } from '@cloudflare/think';
-import type { PrepareStepContext, StepConfig, Session, TurnContext, TurnConfig } from '@cloudflare/think';
+import { Think, defaultContextOverflowClassifier } from '@cloudflare/think';
+import type {
+	ContextOverflowConfig,
+	PrepareStepContext,
+	StepConfig,
+	Session,
+	TurnContext,
+	TurnConfig,
+} from '@cloudflare/think';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel, ToolSet } from 'ai';
 import {
@@ -25,7 +32,13 @@ import { getUserConfigurableSettings } from '../../config';
 import { RateLimitService } from '../../services/rate-limit/rateLimits';
 import { hasCloudflareConfigured } from '../../services/rate-limit/usageChecker';
 import type { RateLimitSettings } from '../../services/rate-limit/config';
-import { THINK_MODEL_CONFIG } from './model-config';
+import {
+	UNKNOWN_THINK_MODEL_CONTEXT_SIZE,
+	contextSizeForStoredThinkModel,
+	creditCostForStoredThinkModel,
+	thinkTurnProviderOptions,
+	type ThinkReasoningEffort,
+} from './model-config';
 
 /**
  * Per-instance configuration pushed into a {@link ThinkAgent} by the host
@@ -37,16 +50,28 @@ export interface ThinkAgentConfig {
 	/** Owner — used for usage attribution / logging. */
 	userId: string;
 	/**
-	 * Fully-resolved model coordinates. The behavior computes these from the
-	 * user's `ModelConfig` + AGENT_CONFIG via `getConfigurationForModel`, so
-	 * `getModel()` here is a thin `@ai-sdk/openai` provider over the same
-	 * AI Gateway `/compat` endpoint the rest of the platform uses.
+	 * Fully-resolved model coordinates. The host behavior resolves `THINK_MODEL`
+	 * (or the upstream default when that var is unset) through
+	 * `getConfigurationForModel`, so `getModel()` here is a thin `@ai-sdk/openai`
+	 * provider over the same AI Gateway `/compat` endpoint the rest of the
+	 * platform uses.
 	 */
 	model: {
 		baseURL: string;
 		apiKey: string;
 		modelName: string;
 		contextSize?: number;
+		/**
+		 * Credits charged per model step. Resolved once, when the session is
+		 * created, and read by `beforeStep`. Not re-read from `THINK_MODEL`.
+		 */
+		creditCost?: number;
+		/**
+		 * `THINK_REASONING_EFFORT`, resolved once when the session is created.
+		 * Absent when the var is unset. `beforeTurn` reads this and does not
+		 * re-read the env var.
+		 */
+		reasoningEffort?: ThinkReasoningEffort;
 		headers?: Record<string, string>;
 		/**
 		 * When true, the AI Gateway holds the provider keys (BYOK / stored
@@ -158,6 +183,40 @@ function fixToolCallStream(
  * default DO-SQLite workspace.
  */
 export class ThinkAgent extends Think<Env> {
+	/**
+	 * Compact from the context window stored at session creation. Unknown
+	 * models persist a conservative window (see model-config); using Gemini's
+	 * 1M here starts compaction after those models have already overflowed.
+	 * Headroom 0.85 triggers the proactive guard before the provider rejects
+	 * the prompt. The reactive classifier is the backstop when usage is missing.
+	 *
+	 * Installed as an accessor because `Think.contextOverflow` is a data
+	 * property, and a subclass getter is rejected by TypeScript. The accessor
+	 * replaces that property after `super()` so each step sees the session's
+	 * stored window.
+	 */
+	constructor(ctx: DurableObjectState, env: Env) {
+		super(ctx, env);
+		Object.defineProperty(this, 'contextOverflow', {
+			configurable: true,
+			enumerable: true,
+			get: () => this.contextOverflowForSession(),
+		});
+	}
+
+	private contextOverflowForSession(): ContextOverflowConfig {
+		const model = this.getConfig<ThinkAgentConfig>()?.model;
+		const maxInputTokens = model
+			? contextSizeForStoredThinkModel(model)
+			: UNKNOWN_THINK_MODEL_CONTEXT_SIZE;
+		return {
+			reactive: true,
+			proactive: { maxInputTokens, headroom: 0.85, maxCompactions: 1 },
+		};
+	}
+
+	override classifyChatError = defaultContextOverflowClassifier;
+
 	/** Step budget per turn (Think's default is 10). */
 	override maxSteps = 25;
 	/** SpaceDO has no shell; expose only the explicit file tools. */
@@ -306,11 +365,21 @@ export class ThinkAgent extends Think<Env> {
 		}
 		console.info('Think context selected', {
 			model: config?.model.modelName,
-			contextSize: config?.model.contextSize,
+			contextSize: config?.model ? contextSizeForStoredThinkModel(config.model) : undefined,
+			reasoningEffort: config?.model.reasoningEffort,
 			originalMessageCount: ctx.messages.length,
 			selectedMessageCount: messages.length,
 		});
-		return { messages };
+		const reasoningEffort = config?.model.reasoningEffort;
+		if (!reasoningEffort) return { messages };
+		// `@ai-sdk/openai` chat reads `providerOptions.openai.reasoningEffort`
+		// into `reasoning_effort`. The key follows the language-model provider
+		// id (`openai.chat` today). A string model id has no provider, so the
+		// key stays `openai`.
+		const model = this.getModel();
+		const provider = typeof model === 'string' ? 'openai' : model.provider;
+		const providerOptions = thinkTurnProviderOptions(reasoningEffort, provider);
+		return providerOptions ? { messages, providerOptions } : { messages };
 	}
 
 	override getSkills(): SkillSource[] {
@@ -370,7 +439,7 @@ export class ThinkAgent extends Think<Env> {
 				'',
 				false,
 				this.turnUsage.hasCloudflareConfigured,
-				{ creditCost: THINK_MODEL_CONFIG.creditCost, throwOnExceeded: false },
+				{ creditCost: creditCostForStoredThinkModel(config.model), throwOnExceeded: false },
 			);
 		}
 		if (ctx.stepNumber >= this.maxSteps - 1) {

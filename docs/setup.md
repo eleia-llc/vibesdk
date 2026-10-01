@@ -136,6 +136,18 @@ The setup script offers multiple AI providers with intelligent multi-selection:
 - **Manual config.ts editing required** for all model configurations
 - Model names must follow `<provider-name>/<model-name>` format
 
+**Think agent (`THINK_MODEL`):**
+- Think does not read `AGENT_CONFIG` in `worker/agents/inferutils/config.ts`. Its model is the `THINK_MODEL` var.
+- Leave it unset to keep the upstream default, `google-ai-studio/gemini-3.6-flash`.
+- Set an AI Gateway OpenAI-compatible id, `<provider>/<model>` (for example `openai/gpt-5-mini`, `google-ai-studio/gemini-3-flash-preview`, `grok/grok-4`, `anthropic/claude-sonnet-4-5`, `dynamic/customer-support`, or `custom-<slug>/<model>`).
+- Workers AI goes through the same gateway endpoint. Use `workers-ai/@cf/<org>/<model>` or the shorthand `@cf/<org>/<model>` (also `@hf/...`). Example: `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`. The model must support function calling; Think's tool loop speaks OpenAI chat completions.
+- An invalid value or an unsupported provider fails when the Think session is created, before any generation request. The error names `THINK_MODEL` and the supported providers.
+- The id and its context window and credit cost are stored on the session at creation. Later steps do not re-read `THINK_MODEL`.
+- A model id that is not in the catalog does not inherit Gemini's 1M context or credit of 2. It uses a 128K window (`131072`) and credit `8`, and Think compacts proactively at 85% of that window. Set `THINK_MODEL_CONTEXT_SIZE` and `THINK_MODEL_CREDIT_COST` to override those two numbers for uncatalogued models only. Catalog entries and the unset Gemini default ignore the overrides. An invalid override fails session creation.
+- `workers-ai/@cf/zai-org/glm-5.3` and `workers-ai/@cf/zai-org/glm-5.3-flash` are catalog entries. Both use the published 1,048,576 context window. Credit follows the catalog baseline (GPT-5 Mini at $0.25 per million input tokens = 1 credit) against Workers AI input prices: GLM 5.3 is $1.40 (credit `5.6`) and GLM 5.3 Flash is $0.15 (credit `0.6`). Before that lookup, Think collapses a repeated `workers-ai/` prefix and accepts `@cf` / `@hf` and the Workers AI prefix in any case, then matches the catalog id case-insensitively. A session that already stored the unknown-model window of 131072 for one of these ids uses the catalog window and credit on the next turn.
+- `THINK_REASONING_EFFORT` is optional and accepts only `low`, `medium`, or `high`. It is resolved once when the session is created and sent on each turn as `providerOptions` on the AI SDK model Think actually calls. That call is OpenAI chat completions, so the key is `openai` (`providerOptions.openai.reasoningEffort`), which the SDK writes as `reasoning_effort`. If `getModel()` reports a different provider id, the key is that id's first segment instead of the gateway slug. Unset or blank sends nothing, matching upstream. GLM 5.3 otherwise reasons without a cap (Workers AI's own default is `max`) and a turn can take 15 to 20 minutes. An invalid value throws `ThinkModelConfigError` at session creation, the same way an invalid `THINK_MODEL` does.
+- Do not put `THINK_MODEL`, `THINK_MODEL_CONTEXT_SIZE`, `THINK_MODEL_CREDIT_COST`, or `THINK_REASONING_EFFORT` in `wrangler.jsonc`. `keep_vars` preserves a dashboard variable, and a committed empty string would clear it on deploy. Set them as plain-text variables in the Cloudflare dashboard, in `.dev.vars` for local development, or in `.prod.vars` so `bun run deploy` uploads them. Use only one of the dashboard variable or the secret, not both: Cloudflare rejects a duplicate name.
+
 ### OAuth Configuration
 
 The script will also ask for OAuth credentials:
@@ -216,6 +228,10 @@ Feature settings are intentionally omitted from the committed wrangler `vars`. F
 | `ALLOCATION_STRATEGY` | Selects the legacy sandbox allocation strategy | Default strategy | Managed in the dashboard rather than through production secrets. |
 | `USE_CLOUDFLARE_IMAGES` | Enables Cloudflare Images uploads | Off | Set a non-empty value to enable. |
 | `USE_TUNNEL_FOR_PREVIEW` | Uses a tunnel for local previews | Off | Dev-only; set in `.dev.vars`, not the production dashboard. |
+| `THINK_MODEL` | Selects the Think agent model routed through AI Gateway | Upstream default `google-ai-studio/gemini-3.6-flash` | `<provider>/<model>`, or `workers-ai/@cf/<org>/<model>` / `@cf/<org>/<model>`. Invalid values fail at Think session creation. See [Think agent model](#important-model-configuration-notes). |
+| `THINK_MODEL_CONTEXT_SIZE` | Context window for a Think model that is not in the catalog | `131072` (128K) | Positive number. Ignored for the Gemini default and for catalog models. Compaction starts at 85% of the stored window. |
+| `THINK_MODEL_CREDIT_COST` | Credit charged per step for a Think model that is not in the catalog | `8` | Positive number. Ignored for the Gemini default and for catalog models. |
+| `THINK_REASONING_EFFORT` | Caps Think's `reasoning_effort` for the session | Omitted (upstream) | `low`, `medium`, or `high`. Invalid values fail at Think session creation. For `workers-ai/@cf/zai-org/glm-5.3`, set this or the model reasons without a cap. |
 
 Existing deployments retain previously configured dashboard values when this configuration is deployed. New deployments must explicitly set `ENABLE_READ_REPLICAS="true"` or `ENABLE_CLOUDFLARE_LIMITS="true"` in the dashboard to preserve the former committed defaults.
 
@@ -372,6 +388,21 @@ Alternatively, create `.prod.vars` manually based on `.dev.vars` but with:
 - Production domain in `CUSTOM_DOMAIN`
 - Production API keys and secrets
 - `ENVIRONMENT="prod"`
+
+### workers.dev without CUSTOM_DOMAIN
+
+`wrangler.jsonc` commits `CUSTOM_DOMAIN` as an empty string. `bun run deploy` omits that empty value so `keep_vars: true` does not wipe a domain set in the dashboard. If both the dashboard and `.prod.vars` leave it empty, the worker serves its own `https://<name>.<account>.workers.dev` host (and localhost in dev) instead of returning 500. Path-based Space previews (`/space/<name>/preview/<branch>/`) are on that same host. Wildcard preview subdomains still need `CUSTOM_DOMAIN` or `CUSTOM_PREVIEW_DOMAIN`.
+
+Do not set `ENVIRONMENT` to `dev` on that deployment. `dev`, `development`, and `local` select the local browser sidecar and rewrite every preview URL to `DEV_BROWSER_PREVIEW_ORIGIN` (`http://localhost:5173` when unset).
+
+### Think console tool (Browser Run)
+
+`get_browser_console_logs` opens the signed preview URL in Cloudflare Browser Run when `ENVIRONMENT` is not a dev value. Two configurations produce a 403 or a failed navigation:
+
+1. **Loopback rewrite.** `DEV_BROWSER_PREVIEW_ORIGIN` and `DEV_BROWSER_SIDECAR_URL` are dev-only. They are not production wrangler vars. If a previous deploy stored `DEV_BROWSER_PREVIEW_ORIGIN=http://localhost:5173` as a Worker variable, delete it (and `DEV_BROWSER_SIDECAR_URL`) under Workers → Settings → Variables. `keep_vars` will not delete them just because they left `wrangler.jsonc`. Set `ENVIRONMENT=prod`.
+2. **workers.dev bot protection.** Browser Run is classified as a bot. The `workers.dev` zone belongs to Cloudflare, so you cannot add a WAF skip rule there, and Browser Run receives HTTP 403. Set `CUSTOM_DOMAIN` to a hostname on a zone you control. On that zone, turn off Bot Fight Mode and Browser Integrity Check for the preview host. Allowlisting Browser Run by Bot Detection ID requires an Enterprise WAF custom rule. Also disable Cloudflare Access on that Worker (Workers → Settings → Domains & Routes) if it is enabled: Access returns 403 because Browser Run cannot sign in.
+
+The tool returns that explanation in `warning` when it refuses a loopback URL or records HTTP 403 from the preview host.
 
 ## Next Steps
 

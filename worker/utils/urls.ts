@@ -44,6 +44,71 @@ export function isLocalHost(host: string): boolean {
  * (build.cloudflare.dev, etc.) always have dots; internal
  * synthetic ones generally don't.
  */
+/**
+ * `name.account.workers.dev` (and deeper labels). Not `workers.dev` itself.
+ * Used when `CUSTOM_DOMAIN` is empty so the worker's own hostname can serve
+ * the platform instead of failing every request with 500.
+ */
+export function isWorkersDevHostname(hostname: string): boolean {
+    const bare = hostname.split(':')[0].toLowerCase();
+    const labels = bare.split('.');
+    return labels.length >= 4 && labels.at(-2) === 'workers' && labels.at(-1) === 'dev';
+}
+
+/**
+ * Host that serves the platform UI and path-based Space previews.
+ * A configured `CUSTOM_DOMAIN` wins. Otherwise localhost and this worker's
+ * `*.workers.dev` host are the platform.
+ */
+export function isMainPlatformHostname(hostname: string, env: { CUSTOM_DOMAIN?: string }): boolean {
+    const bare = hostname.split(':')[0];
+    if (bare === 'localhost') return true;
+    const custom = (env.CUSTOM_DOMAIN ?? '').trim();
+    if (custom) return bare === custom;
+    return isWorkersDevHostname(bare);
+}
+
+/**
+ * Wrangler vars whose blank committed value must not be deployed.
+ * `keep_vars: true` preserves a dashboard value only when the key is absent
+ * from the uploaded config. An empty string in `wrangler.jsonc` overwrites it.
+ */
+export const BLANK_PLATFORM_DOMAIN_VARS = ['CUSTOM_DOMAIN', 'CUSTOM_PREVIEW_DOMAIN'] as const;
+
+export function omitBlankPlatformDomainVars<T extends Record<string, unknown>>(
+    vars: T,
+): { vars: T; omitted: Record<string, string> } {
+    const next = { ...vars };
+    const omitted: Record<string, string> = {};
+    for (const key of BLANK_PLATFORM_DOMAIN_VARS) {
+        if (!Object.prototype.hasOwnProperty.call(next, key)) continue;
+        const value = next[key];
+        if (typeof value === 'string' && value.trim() === '') {
+            omitted[key] = value;
+            delete next[key];
+        }
+    }
+    return { vars: next, omitted };
+}
+
+/**
+ * Value written into `.prod.vars` for `wrangler secret bulk`.
+ * An existing `JWT_SECRET` must be uploaded again. Generating a replacement
+ * only when it is absent used to drop the current secret from the file, so
+ * the next deploy never refreshed it.
+ */
+export function resolveProdSecretValue(
+    varName: string,
+    env: Record<string, string | undefined>,
+    generatedJwtSecret: string | undefined,
+): string | undefined {
+    if (varName === 'JWT_SECRET') {
+        return env.JWT_SECRET ? env.JWT_SECRET : generatedJwtSecret;
+    }
+    const value = env[varName];
+    return value && value !== '' ? value : undefined;
+}
+
 export function isPublicHostname(host: string): boolean {
     if (!host) return false;
     const bare = host.split(':')[0];

@@ -18,7 +18,8 @@ export function validateWebSocketOrigin(request: Request, env: Env): boolean {
         return false;
     }
     
-    if (!isOriginAllowed(env, origin)) {
+    const requestHost = new URL(request.url).hostname;
+    if (!isOriginAllowed(env, origin, requestHost)) {
         logger.warn('WebSocket connection rejected from unauthorized origin', { origin });
         return false;
     }

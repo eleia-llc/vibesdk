@@ -4,7 +4,7 @@ import { createApp } from './app';
 // import * as Sentry from '@sentry/cloudflare';
 // import { sentryOptions } from './observability/sentry';
 import { DORateLimitStore as BaseDORateLimitStore } from './services/rate-limit/DORateLimitStore';
-import { getPreviewDomain, getProtocolForHost, isSeparatePreviewDomain } from './utils/urls';
+import { getPreviewDomain, getProtocolForHost, isMainPlatformHostname, isSeparatePreviewDomain, isWorkersDevHostname } from './utils/urls';
 import { proxyToAiGateway } from './services/aigateway-proxy/controller';
 import { isOriginAllowed } from './config/security';
 import { isDev } from './utils/envs';
@@ -68,9 +68,13 @@ function withPreviewCorsHeaders(env: Env, request: Request, response: Response):
     }
 
     const origin = request.headers.get('Origin');
+    const requestHost = new URL(request.url).hostname;
     const allowedOrigins = [env.CUSTOM_DOMAIN, getPreviewDomain(env)]
         .filter((host): host is string => !!host && host.trim() !== '')
         .map((host) => `${getProtocolForHost(host)}://${host}`);
+    if (!(env.CUSTOM_DOMAIN ?? '').trim() && isWorkersDevHostname(requestHost)) {
+        allowedOrigins.push(`${getProtocolForHost(requestHost)}://${requestHost}`);
+    }
 
     const headers = new Headers(response.headers);
     if (origin && (isDev(env) || allowedOrigins.includes(origin))) {
@@ -243,28 +247,31 @@ const worker = {
         // logger.info(`Received request: ${request.method} ${request.url}`);
 		// --- Pre-flight Checks ---
 
-		// 1. Critical configuration check: Ensure custom domain is set.
-        const previewDomain = getPreviewDomain(env);
-		const separatePreviewDomain = isSeparatePreviewDomain(env);
-		if (!previewDomain || previewDomain.trim() === '') {
-			logger.error('FATAL: env.CUSTOM_DOMAIN is not configured in wrangler.toml or the Cloudflare dashboard.');
-			return new Response('Server configuration error: Application domain is not set.', { status: 500 });
-		}
-
 		const url = new URL(request.url);
 		const { hostname, pathname } = url;
 
-		// 2. Security: Immediately reject any requests made via an IP address.
+		// 1. Security: Immediately reject any requests made via an IP address.
 		const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 		if (ipRegex.test(hostname)) {
 			return new Response('Access denied. Please use the assigned domain name.', { status: 403 });
 		}
 
+        const previewDomain = getPreviewDomain(env);
+		const separatePreviewDomain = isSeparatePreviewDomain(env);
+		// An empty CUSTOM_DOMAIN used to fail every request. workers.dev and
+		// localhost can still serve the platform and path-based previews.
+		if ((!previewDomain || previewDomain.trim() === '') && !isMainPlatformHostname(hostname, env)) {
+			logger.error('FATAL: CUSTOM_DOMAIN is empty and this request is not on a workers.dev hostname or localhost.');
+			return new Response(
+				'Server configuration error: CUSTOM_DOMAIN is not set. Open this worker at its workers.dev hostname, or set CUSTOM_DOMAIN to that hostname or a custom domain.',
+				{ status: 500 },
+			);
+		}
+
 		// --- Domain-based Routing ---
 
 		// Normalize hostnames for both local development (localhost) and production.
-		const isMainDomainRequest =
-			hostname === env.CUSTOM_DOMAIN || hostname === 'localhost';
+		const isMainDomainRequest = isMainPlatformHostname(hostname, env);
 		const isSubdomainRequest =
 			hostname.endsWith(`.${previewDomain}`) ||
 			(hostname.endsWith('.localhost') && hostname !== 'localhost');
@@ -317,7 +324,7 @@ const worker = {
                 const origin = request.headers.get('Origin');
                 if (origin) {
                     const previewDomain = getPreviewDomain(env);
-                    const originAllowed = isOriginAllowed(env, origin) || origin.endsWith(`.${previewDomain}`);
+                    const originAllowed = isOriginAllowed(env, origin, hostname) || origin.endsWith(`.${previewDomain}`);
                     if (!originAllowed) {
                         logger.warn(`Access denied. Invalid origin: ${origin}, preview domain: ${previewDomain}`);
                         return new Response('Access denied. Invalid origin.', { status: 403 });

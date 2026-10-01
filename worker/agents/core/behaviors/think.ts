@@ -18,6 +18,8 @@ import { PreviewType, TemplateDetails } from 'worker/services/sandbox/sandboxTyp
 import {
 	buildSpacePreviewPath,
 	getPreviewDomain,
+	getProtocolForHost,
+	isLocalHost,
 	isSeparatePreviewDomain,
 	resolvePreviewHost,
 } from 'worker/utils/urls';
@@ -27,7 +29,7 @@ import { AppService } from 'worker/database/services/AppService';
 import { getConfigurationForModel } from '../../inferutils/core';
 import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
-import { THINK_MODEL_CONFIG, THINK_MODEL_ID } from '../../think/model-config';
+import { formatThinkModelId, resolveThinkModel, resolveThinkReasoningEffort } from '../../think/model-config';
 import type { BranchDeploymentBundle } from '@space-do/space';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
@@ -211,15 +213,25 @@ export class ThinkCodingBehavior
 	}
 
 	/**
-	 * Resolve the AI Gateway model coordinates from VibeSDK's model config and
-	 * push them (plus space name + system prompt) into the ThinkAgent DO.
+	 * Resolve the AI Gateway model coordinates and push them (plus space name
+	 * + system prompt) into the ThinkAgent DO.
+	 *
+	 * `THINK_MODEL` and `THINK_REASONING_EFFORT` are validated here, before
+	 * any gateway or model request. An invalid value throws and fails session
+	 * creation. Unset model keeps the upstream default. Unset reasoning
+	 * effort stores nothing, so the request omits `reasoning_effort`.
 	 */
 	private async configureThinkAgent(): Promise<void> {
 		const inf = this.getInferenceContext();
 		const userId = this.state.metadata.userId;
 
-		const modelName = THINK_MODEL_ID;
-		const aiModelConfig = THINK_MODEL_CONFIG;
+		const resolved = resolveThinkModel(this.env.THINK_MODEL, {
+			contextSize: this.env.THINK_MODEL_CONTEXT_SIZE,
+			creditCost: this.env.THINK_MODEL_CREDIT_COST,
+		});
+		const reasoningEffort = resolveThinkReasoningEffort(this.env.THINK_REASONING_EFFORT);
+		const modelName = resolved.modelId;
+		const aiModelConfig = resolved.config;
 
 		let conf: { baseURL: string; apiKey: string; defaultHeaders?: Record<string, string> };
 		try {
@@ -274,11 +286,16 @@ export class ThinkCodingBehavior
 				apiKey: conf.apiKey,
 				modelName,
 				contextSize: aiModelConfig.contextSize,
+				creditCost: aiModelConfig.creditCost,
+				...(reasoningEffort ? { reasoningEffort } : {}),
 				headers: Object.keys(headers).length > 0 ? headers : undefined,
 				useStoredKeys: usesStoredKeys,
 			},
 			systemPrompt: this.buildSystemPrompt(modelName, aiModelConfig.provider),
-			previewUrl: await this.getBrowserPreviewURL(0).catch(() => undefined),
+			previewUrl: await this.getBrowserPreviewURL(0).catch((error) => {
+				this.logger.warn('Failed to build browser preview URL', error);
+				return undefined;
+			}),
 		};
 
 		try {
@@ -298,7 +315,7 @@ export class ThinkCodingBehavior
 	 */
 	private buildSystemPrompt(modelName: string, provider: string): string {
 		return [
-			`You are powered by the model named ${modelName}. The exact model ID is ${provider}/${modelName}.`,
+			`You are powered by the model named ${modelName}. The exact model ID is ${formatThinkModelId(provider, modelName)}.`,
 			'<env>',
 			`  Platform: Cloudflare Workers (SpaceDO preview — no shell, no local filesystem)`,
 			`  Today's date: ${new Date().toDateString()}`,
@@ -368,7 +385,14 @@ export class ThinkCodingBehavior
 			return `https://${getPreviewDomain(this.env)}`;
 		}
 		const host = resolvePreviewHost(this.env, this.state.wsOrigin);
-		return `https://${host}`;
+		// Production Browser Run cannot open loopback. `DEV_BROWSER_PREVIEW_ORIGIN`
+		// is a dev sidecar setting; using it here sends the console tool to localhost.
+		if (!host || isLocalHost(host)) {
+			throw new Error(
+				'CUSTOM_DOMAIN is empty and this session has no public host. Set CUSTOM_DOMAIN to this worker\'s workers.dev hostname or a custom domain. Keep ENVIRONMENT=prod so the console tool does not rewrite the preview to DEV_BROWSER_PREVIEW_ORIGIN.',
+			);
+		}
+		return `${getProtocolForHost(host)}://${host}`;
 	}
 
 	public async getBrowserPreviewURL(previewVersionOverride?: number): Promise<string> {

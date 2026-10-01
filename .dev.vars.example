@@ -50,6 +50,22 @@
 # AI Gateway URL Override (Leave as-is if not going to set it)
 #CLOUDFLARE_AI_GATEWAY_URL=""
 
+# Think agent model (optional). Leave unset to keep the upstream default
+# (google-ai-studio/gemini-3.6-flash). Value is an AI Gateway OpenAI-compatible
+# model id: <provider>/<model>. Workers AI through the gateway, either form:
+#THINK_MODEL="workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+#THINK_MODEL="@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# Context window and credit for a THINK_MODEL id that is not in the catalog.
+# Ignored for the Gemini default and for catalog models. Defaults: 131072 and 8.
+#THINK_MODEL_CONTEXT_SIZE="131072"
+#THINK_MODEL_CREDIT_COST="8"
+# Optional. low, medium, or high. Unset sends no reasoning_effort.
+# Set this with workers-ai/@cf/zai-org/glm-5.3; otherwise that model reasons without a cap.
+#THINK_REASONING_EFFORT="medium"
+# Dev-only. The production worker does not use these. Browser Run cannot open localhost.
+#DEV_BROWSER_SIDECAR_URL="http://127.0.0.1:9223"
+#DEV_BROWSER_PREVIEW_ORIGIN="http://localhost:5173"
+
 # Cloudflare API Key and Account ID. This is important
 # CLOUDFLARE_API_TOKEN=""
 # CLOUDFLARE_ACCOUNT_ID=""

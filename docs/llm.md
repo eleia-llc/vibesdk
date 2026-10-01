@@ -10,6 +10,7 @@
 - `@cloudflare/worker-bundler` builds committed project files, and a Worker Loader binding loads them as a Dynamic Worker preview.
 - Generated apps export an `App` Durable Object class that SpaceDO hosts as a Facet with isolated SQLite storage.
 - AI Gateway routes configured model providers and provides centralized observability and caching.
+- Think's model comes from the `THINK_MODEL` var (an AI Gateway `provider/model` id, including `workers-ai/@cf/...`). When the var is unset, Think keeps its built-in default. It does not read `AGENT_CONFIG`. The resolved id, context window, and credit are stored when the session is created. Models missing from the catalog use a 128K window and credit 8 unless `THINK_MODEL_CONTEXT_SIZE` / `THINK_MODEL_CREDIT_COST` override them. `workers-ai/@cf/zai-org/glm-5.3` and `glm-5.3-flash` are catalogued at 1,048,576 tokens (credits 5.6 and 0.6). `THINK_REASONING_EFFORT` (`low`, `medium`, or `high`) is stored with the session and sent as `reasoning_effort`; unset omits it.
 
 SpaceDO is the workspace and file layer. For Artifacts-backed spaces, Cloudflare Artifacts is the git and history layer; SQL-backed spaces retain local git history in SQLite. Do not describe SpaceDO itself as git-backed.
 

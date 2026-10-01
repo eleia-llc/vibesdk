@@ -6,7 +6,7 @@
 import { DEFAULT_RATE_LIMIT_SETTINGS, RateLimitSettings } from "../services/rate-limit/config";
 import { Context } from "hono";
 import { isDev } from "../utils/envs";
-import { getPreviewDomain, isSeparatePreviewDomain } from "../utils/urls";
+import { getPreviewDomain, isSeparatePreviewDomain, isWorkersDevHostname } from "../utils/urls";
 
 // Type definitions for security configurations
 export interface CORSConfig {
@@ -65,12 +65,21 @@ export function getAllowedOrigins(env: Env): string[] {
     return origins;
 }
 
-export function isOriginAllowed(env: Env, origin: string): boolean {
+export function isOriginAllowed(env: Env, origin: string, requestHostname?: string): boolean {
     const allowedOrigins = getAllowedOrigins(env);
     if (!origin) return false;
-    
-    // Check against allowed origins
-    return allowedOrigins.includes(origin);
+    if (allowedOrigins.includes(origin)) return true;
+
+    // No custom domain: the worker's own workers.dev host is the platform origin.
+    // Any other workers.dev host stays rejected (same-site under the public suffix).
+    if ((env.CUSTOM_DOMAIN ?? '').trim() !== '') return false;
+    const requestHost = requestHostname?.split(':')[0];
+    if (!requestHost || !isWorkersDevHostname(requestHost)) return false;
+    try {
+        return new URL(origin).hostname === requestHost;
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -79,7 +88,15 @@ export function isOriginAllowed(env: Env, origin: string): boolean {
  */
 export function getCORSConfig(env: Env): CORSConfig {
     return {
-        origin: getAllowedOrigins(env),
+        origin: (origin: string, c: Context) => {
+            let host: string | undefined;
+            try {
+                host = new URL(c.req.url).hostname;
+            } catch {
+                host = undefined;
+            }
+            return isOriginAllowed(env, origin, host) ? origin : undefined;
+        },
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
         allowHeaders: [
             'Content-Type',
