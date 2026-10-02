@@ -22,7 +22,7 @@ vi.mock('./api/cloudflare-api', () => ({
 }));
 
 // Import after mocks are registered
-const { deployThinkBundleToUserAccount, deployThinkBundleToPlatform } = await import('./think-user-deploy');
+const { buildEntryModule, deployThinkBundleToUserAccount, deployThinkBundleToPlatform } = await import('./think-user-deploy');
 
 function makeBundle(overrides?: Partial<BranchDeploymentBundle>): BranchDeploymentBundle {
 	return {
@@ -123,6 +123,56 @@ describe('deployThinkBundleToPlatform: assets-only static site', () => {
 		expect(assetsConfig).toMatchObject({ binding: 'ASSETS', not_found_handling: 'single-page-application' });
 		expect([...modules.keys()]).toEqual([]);
 		expect(migrations).toBeUndefined();
+	});
+});
+
+describe('buildEntryModule', () => {
+	it('serves a 404-page static site straight from ASSETS (real 404.html, no SPA fallback)', () => {
+		const entry = buildEntryModule('', true, false, '404-page');
+		expect(entry).toContain('return env.ASSETS.fetch(request);');
+		// The SPA fallback answered unknown HTML paths with /index.html, which the
+		// asset platform redirects (307) to "/": a soft 404 for crawlers.
+		expect(entry).not.toContain('/index.html');
+		expect(entry).not.toContain('"Not Found"');
+	});
+
+	it('keeps the SPA fallback for static sites without 404-page handling', () => {
+		for (const handling of [undefined, 'single-page-application', 'none']) {
+			const entry = buildEntryModule('', true, false, handling);
+			expect(entry).toContain('new URL("/index.html", request.url)');
+		}
+	});
+
+	it('still routes to the App when a server Worker declares 404-page', () => {
+		const entry = buildEntryModule('index.js', true, true, '404-page');
+		expect(entry).toContain('export { App } from "./index.js"');
+		expect(entry).toContain('env.VIBE_APP.get(');
+	});
+});
+
+describe('deployThinkBundleToPlatform: static site with 404-page', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('publishes an entry that returns ASSETS responses verbatim', async () => {
+		await deployThinkBundleToPlatform({
+			accountId: 'platform-account',
+			apiToken: 'platform-token',
+			dispatchNamespace: 'vibesdk-default-namespace',
+			previewDomain: 'build-preview.cloudflare.dev',
+			appName: 'Tostadora Lomaverde',
+			bundle: makeBundle({
+				mainModule: '',
+				modules: {},
+				assets: { '/index.html': '<h1>Lomaverde</h1>', '/404.html': '<h1>No encontrada</h1>' },
+				assetConfig: { html_handling: 'auto-trailing-slash', not_found_handling: '404-page' },
+			}),
+		});
+		const [, entry, , , , , , , assetsConfig] = deployWithAssets.mock.calls[0];
+		expect(entry).toContain('return env.ASSETS.fetch(request);');
+		expect(entry).not.toContain('/index.html');
+		expect(assetsConfig).toMatchObject({ binding: 'ASSETS', not_found_handling: '404-page' });
 	});
 });
 

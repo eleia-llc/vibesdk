@@ -52,11 +52,31 @@ function exportsApp(moduleSource: string): boolean {
 		|| /\bApp\s+as\s+App\b/.test(moduleSource);
 }
 
-function buildEntryModule(mainModule: string, hasAssets: boolean, hasApp: boolean): string {
+/**
+ * Generated Worker entry for a think publish.
+ *
+ * With a server App the entry tries `ASSETS` first and then forwards to the App;
+ * HTML navigations that miss both fall back to `/index.html` (SPA routing).
+ *
+ * A static site without an App that declares `not_found_handling: "404-page"`
+ * gets `ASSETS` verbatim: unknown paths return the site's `404.html` with a
+ * real 404 status. The SPA fallback would otherwise answer unknown HTML paths
+ * with `/index.html`, which the asset platform turns into a 307 to `/` (a soft
+ * 404 for crawlers), and other requests with a bare "Not Found".
+ */
+export function buildEntryModule(
+	mainModule: string,
+	hasAssets: boolean,
+	hasApp: boolean,
+	notFoundHandling?: string,
+): string {
 	const specifier = mainModule.startsWith('.') ? mainModule : `./${mainModule}`;
 	const appExport = hasApp
 		? `export { App } from ${JSON.stringify(specifier)};\n`
 		: 'import { DurableObject } from "cloudflare:workers";\nexport class App extends DurableObject {}\n';
+	if (hasAssets && !hasApp && notFoundHandling === '404-page') {
+		return `${appExport}export default { async fetch(request, env) { return env.ASSETS.fetch(request); } };`;
+	}
 	const assetRouting = hasAssets
 		? 'const assetResponse = await env.ASSETS.fetch(request); if (assetResponse.status !== 404) return assetResponse; const accept = request.headers.get("accept") || ""; if (request.method === "GET" && accept.includes("text/html")) { const indexUrl = new URL("/index.html", request.url); const indexResponse = await env.ASSETS.fetch(new Request(indexUrl, request)); if (indexResponse.status !== 404) return indexResponse; } '
 		: '';
@@ -134,7 +154,12 @@ async function buildThinkBundleArtifacts(
 	const migration = hasApp
 		? [{ tag: `vibe-app-${bundle.commitHash.slice(0, 12)}`, new_sqlite_classes: ['App'] }]
 		: undefined;
-	const entry = buildEntryModule(bundle.mainModule, Boolean(assets), hasApp);
+	const entry = buildEntryModule(
+		bundle.mainModule,
+		Boolean(assets),
+		hasApp,
+		bundle.assetConfig?.not_found_handling,
+	);
 
 	return {
 		scriptName,
