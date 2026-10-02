@@ -14,7 +14,7 @@ export type {
 } from '../../worker/api/websocketTypes';
 
 export type { AgentState } from '../../worker/agents/core/state';
-export type { BehaviorType, ProjectType } from '../../worker/agents/core/types';
+export type { BehaviorType, ProjectType, RenderMode } from '../../worker/agents/core/types';
 export type { FileOutputType, FileConceptType, PhaseConceptType } from '../../worker/agents/schemas';
 export type { TemplateDetails } from '../../worker/services/sandbox/sandboxTypes';
 

@@ -22,6 +22,22 @@ export function isAgenticLikeBehavior(b: BehaviorType): boolean {
 export type ProjectType = 'app' | 'workflow' | 'presentation' | 'general';
 
 /**
+ * How the generated app's pages are rendered.
+ * - `spa` (default): no constraint; the app may render its content with JavaScript.
+ * - `static`: every page must ship its content (headings, copy, title,
+ *   description and Open Graph tags) in the HTML itself, so crawlers and link
+ *   previews read it without running JavaScript. Deploys that break this fail.
+ *   Supported by the `think` behavior only.
+ */
+export const RENDER_MODES = ['spa', 'static'] as const;
+export type RenderMode = (typeof RENDER_MODES)[number];
+
+export function isRenderMode(value: unknown): value is RenderMode {
+    return typeof value === 'string' && (RENDER_MODES as readonly string[]).includes(value);
+}
+
+
+/**
  * Runtime type - WHERE it runs during dev
  * - sandbox: Cloudflare Containers (full apps with UI)
  * - worker: Dynamic Worker Loaders (backend only)  
@@ -63,6 +79,8 @@ interface ThinkAgentInitArgs extends BaseAgentInitArgs {
         templateDetails: TemplateDetails;
         selection: TemplateSelection;
     };
+    /** Requested render mode; `static` makes every deploy require no-JS-readable HTML. */
+    renderMode?: RenderMode;
 }
 
 /** Generic initialization arguments based on state type */

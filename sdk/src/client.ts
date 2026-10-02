@@ -49,6 +49,7 @@ export class VibeClient {
 			selectedTemplate: options.selectedTemplate,
 			behaviorType: options.behaviorType,
 			projectType: options.projectType,
+			renderMode: options.renderMode,
 			images: options.images,
 			credentials: options.credentials,
 		};

@@ -115,3 +115,21 @@ export async function readDirInfos(
   const offset = opts?.offset ?? 0
   return opts?.limit !== undefined ? infos.slice(offset, offset + opts.limit) : infos.slice(offset)
 }
+
+/**
+ * Write a text file, refusing to write over a directory.
+ *
+ * The SQL workspace FS accepts `writeFile` on a path that is already a
+ * directory and keeps the entry a directory, so the write "succeeds" and the
+ * content is unreadable (`readFile` → EISDIR) and missing from every deploy.
+ * Fail loudly instead, the way a POSIX filesystem does.
+ */
+export async function writeTextFile(fs: FileSystem, path: string, content: string): Promise<void> {
+  const existing = await fs.stat(path).catch(() => null)
+  if (existing?.type === "directory") {
+    throw new Error(
+      `EISDIR: ${path} is a directory. Delete the directory first if it should be a file.`,
+    )
+  }
+  await fs.writeFile(path, content)
+}

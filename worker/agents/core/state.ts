@@ -3,7 +3,7 @@ import type { PhasicBlueprint, AgenticBlueprint, PhaseConceptType ,
     Blueprint,
 } from '../schemas';
 import type { InferenceMetadata } from '../inferutils/config.types';
-import { BehaviorType, Plan, ProjectType } from './types';
+import { BehaviorType, Plan, ProjectType, RenderMode } from './types';
 
 export interface FileState extends FileOutputType {
     lastDiff: string;
@@ -136,6 +136,8 @@ export interface ThinkState extends BaseProjectState {
     /** Last commit SHA we successfully deployed. */
     lastDeployedCommit?: string;
     cloudflareDeploymentUrl?: string;
+    /** Render mode requested at creation. Absent on sessions created before it existed (= `spa`). */
+    renderMode?: RenderMode;
 }
 
 export type AgentState = PhasicState | AgenticState | ThinkState;

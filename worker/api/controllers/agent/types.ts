@@ -1,9 +1,26 @@
 import type { PreviewType } from "../../../services/sandbox/sandboxTypes";
 import type { ImageAttachment } from '../../../types/image-attachment';
-import type { BehaviorType, ProjectType } from '../../../agents/core/types';
+import { RENDER_MODES, isRenderMode, type BehaviorType, type ProjectType, type RenderMode } from '../../../agents/core/types';
+export { RENDER_MODES, isRenderMode, type RenderMode } from '../../../agents/core/types';
 import type { CredentialsPayload } from '../../../agents/inferutils/config.types';
 
 export const MAX_AGENT_QUERY_LENGTH = 20_000;
+
+/**
+ * Validate a requested `renderMode`. It must be a known value, and only the
+ * think behavior honors a non-default one (its SpaceDO enforces it on every
+ * deploy). Returns an error message, or null when the request is valid.
+ */
+export function validateRenderMode(renderMode: unknown, behaviorType: BehaviorType): string | null {
+    if (renderMode === undefined) return null;
+    if (!isRenderMode(renderMode)) {
+        return `Invalid "renderMode": expected one of ${RENDER_MODES.join(', ')}`;
+    }
+    if (renderMode !== 'spa' && behaviorType !== 'think') {
+        return `renderMode "${renderMode}" requires behaviorType "think"`;
+    }
+    return null;
+}
 
 export interface CodeGenArgs {
     query: string;
@@ -13,6 +30,8 @@ export interface CodeGenArgs {
     behaviorType?: BehaviorType;
     projectType?: ProjectType;
     images?: ImageAttachment[];
+    /** See {@link RenderMode}. Defaults to `spa`. */
+    renderMode?: RenderMode;
 
     /** Optional ephemeral credentials (BYOK / gateway override) for sdk */
     credentials?: CredentialsPayload;
