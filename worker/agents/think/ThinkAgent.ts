@@ -20,6 +20,7 @@ import {
 } from '@cloudflare/think/tools/workspace';
 import type { SkillSource } from 'agents/skills';
 import { createSpaceWorkspaceOps, type SpaceWorkspaceStub } from './space-workspace-ops';
+import { withWorkspacePathInput } from './workspace-paths';
 import { selectSystemPrompt, PROMPT_MAX_STEPS } from './prompts';
 import { createThinkSkillSource } from './skills';
 import { createAskQuestionsTool } from './ask-questions-tool';
@@ -393,14 +394,17 @@ export class ThinkAgent extends Think<Env> {
 		const previewUrl = this.getConfig<ThinkAgentConfig>()?.previewUrl;
 		// Same names as Think's built-in workspace tools, so these SpaceDO-backed
 		// versions win the tool-merge. Bash is disabled via `workspaceBash`.
+		// File tools take model-supplied paths; normalize them to absolute
+		// workspace paths first (see `workspace-paths.ts`: a relative
+		// `wrangler.json` otherwise becomes an empty directory).
 		return {
-			read: createReadTool({ ops }),
-			write: createWriteTool({ ops }),
-			edit: createEditTool({ ops }),
-			list: createListTool({ ops }),
+			read: withWorkspacePathInput(createReadTool({ ops })),
+			write: withWorkspacePathInput(createWriteTool({ ops })),
+			edit: withWorkspacePathInput(createEditTool({ ops })),
+			list: withWorkspacePathInput(createListTool({ ops })),
 			find: createFindTool({ ops }),
 			grep: createGrepTool({ ops }),
-			delete: createDeleteTool({ ops }),
+			delete: withWorkspacePathInput(createDeleteTool({ ops })),
 			// Save a restore point without deploying. The model decides when.
 			commit: createCommitTool({ getStub: () => this.getSpaceStub() }),
 			// Commit + deploy the SpaceDO branch so the preview rebuilds.

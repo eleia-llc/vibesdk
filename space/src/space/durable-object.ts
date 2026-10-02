@@ -8,7 +8,7 @@ import {
   type BranchDeploymentBundle,
   type DeployContext,
 } from "./deploy-engine"
-import { globInfos, readDirInfos, toFileInfo } from "./fileinfo"
+import { globInfos, readDirInfos, toFileInfo, writeTextFile } from "./fileinfo"
 import { handleAssetRequest, buildAssetManifest, createMemoryStorage, type AssetConfig } from "@cloudflare/worker-bundler"
 import {
   buildInspectorWrapperSource,
@@ -194,7 +194,8 @@ export class SpaceDO extends DurableObject<Env> {
     await this.ensureInit()
     // Route through the overlay FS so a write to a previously-deleted base path
     // clears its whiteout tombstone and makes the file visible again.
-    await this.fs.writeFile(path, content)
+    // `writeTextFile` refuses to write over a directory (see fileinfo.ts).
+    await writeTextFile(this.fs, path, content)
     return { path, size: content.length }
   }
 
