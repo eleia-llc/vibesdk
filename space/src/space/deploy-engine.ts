@@ -1,8 +1,9 @@
 import type { Git } from "@cloudflare/shell/git"
 import type { FileSystem } from "@cloudflare/shell"
 import { createApp, createWorker, type AssetConfig, type Modules } from "@cloudflare/worker-bundler"
-import { parseWranglerConfig, WranglerConfigError } from "./wrangler-config"
+import { parseWranglerConfig, WranglerConfigError, type ParsedWranglerConfig } from "./wrangler-config"
 import { globInfos } from "./fileinfo"
+import { checkStaticHtml, type RenderMode } from "./static-html"
 
 // ─── Deploy Engine ──────────────────────────────────────────────────────────
 
@@ -20,14 +21,24 @@ export interface DeployContext {
   fs: FileSystem
 }
 
+/**
+ * `mainModule` of an assets-only deployment (a static site with no server
+ * entry). Such a deployment has no modules; every request is served from
+ * `assets` with the configured `not_found_handling`.
+ */
+export const ASSETS_ONLY_MAIN_MODULE = ""
+
 export interface BranchDeploymentBundle {
   branch: string
   commitHash: string
+  /** Server entry module name, or `ASSETS_ONLY_MAIN_MODULE` for a static site. */
   mainModule: string
   modules: Record<string, string | Record<string, unknown>>
   assets: Record<string, string>
   assetConfig: AssetConfig | undefined
   compatibilityDate: string
+  /** Non-blocking build notes (e.g. static HTML link-preview recommendations). */
+  warnings?: string[]
 }
 
 export async function handleDeployCommand(
@@ -99,7 +110,7 @@ async function deployBranch(
   ctx: DeployContext,
   request: Request
 ): Promise<Response> {
-  const body = (await request.json()) as { branch: string }
+  const body = (await request.json()) as { branch: string; renderMode?: RenderMode }
   const branch = body.branch
   if (!branch) {
     return jsonResponse({ error: "branch is required" }, 400)
@@ -107,7 +118,7 @@ async function deployBranch(
 
   let bundle: BranchDeploymentBundle
   try {
-    bundle = await buildBranchDeployment(ctx, branch)
+    bundle = await buildBranchDeployment(ctx, branch, { renderMode: body.renderMode })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     const separator = message.indexOf(": ")
@@ -145,21 +156,79 @@ async function deployBranch(
     commit_hash: commitHash,
     main_module: mainModule,
     has_assets: Object.keys(serializedAssets).length > 0,
+    ...(isAssetsOnlyDeployment(bundle) && { assets_only: true }),
+    ...(body.renderMode && { render_mode: body.renderMode }),
+    ...(bundle.warnings?.length && { warnings: bundle.warnings }),
     compatibility_date: compatDate,
     deployed_at: new Date(now).toISOString(),
   })
 }
 
+export interface BuildDeploymentOptions {
+  /**
+   * Render mode recorded for the space. `static` requires every shipped HTML
+   * page to be readable without JavaScript (see `checkStaticHtml`).
+   */
+  renderMode?: RenderMode
+}
+
 export async function buildBranchDeployment(
   ctx: DeployContext,
-  branch: string
+  branch: string,
+  options: BuildDeploymentOptions = {}
 ): Promise<BranchDeploymentBundle> {
   const { commitHash, files } = await readBranchFiles(ctx, branch)
   if (Object.keys(files).length === 0) {
     throw new Error(`No files found in branch "${branch}"`)
   }
+  return {
+    branch,
+    commitHash,
+    ...(await buildDeploymentFromFiles(files, options)),
+  }
+}
 
-  let wranglerCfg
+/**
+ * Server entry candidates `@cloudflare/worker-bundler` falls back to when
+ * `wrangler.json` has no `main`. Kept in the same order as the bundler's
+ * `detectEntryPoint` so projects that relied on the convention still build
+ * their server Worker.
+ */
+export const CONVENTIONAL_SERVER_ENTRIES = [
+  "src/index.ts",
+  "src/index.js",
+  "src/index.mts",
+  "src/index.mjs",
+  "index.ts",
+  "index.js",
+  "src/worker.ts",
+  "src/worker.js",
+] as const
+
+/**
+ * The server entry of a project, or `undefined` when it has none. `main` in
+ * `wrangler.json` wins; otherwise the conventional entry files are used.
+ * `package.json` fields are deliberately ignored: a static site's
+ * `package.json` describes its tooling, not a Worker.
+ */
+export function resolveServerEntry(
+  files: Record<string, string>,
+  wranglerCfg: ParsedWranglerConfig
+): string | undefined {
+  if (wranglerCfg.main) return wranglerCfg.main.replace(/^\.?\//, "")
+  return CONVENTIONAL_SERVER_ENTRIES.find((entry) => entry in files)
+}
+
+/** True when a deployment ships assets only and has no server Worker. */
+export function isAssetsOnlyDeployment(bundle: Pick<BranchDeploymentBundle, "mainModule">): boolean {
+  return bundle.mainModule === ASSETS_ONLY_MAIN_MODULE
+}
+
+export async function buildDeploymentFromFiles(
+  files: Record<string, string>,
+  options: BuildDeploymentOptions = {}
+): Promise<Omit<BranchDeploymentBundle, "branch" | "commitHash">> {
+  let wranglerCfg: ParsedWranglerConfig
   try {
     wranglerCfg = parseWranglerConfig(files)
   } catch (e) {
@@ -175,6 +244,8 @@ export async function buildBranchDeployment(
     )
   }
 
+  const compatibilityDate = wranglerCfg.compatibilityDate ?? "2025-04-01"
+  let bundle: Omit<BranchDeploymentBundle, "branch" | "commitHash">
   try {
     const assetsDir = wranglerCfg.assets?.directory?.replace(/^\.?\//, "").replace(/\/$/, "")
     const collectedAssets = assetsDir
@@ -194,40 +265,62 @@ export async function buildBranchDeployment(
           }),
         }
       : undefined
+    const serverEntry = resolveServerEntry(files, wranglerCfg)
 
-    if (Object.keys(collectedAssets).length) {
+    if (Object.keys(collectedAssets).length && !serverEntry) {
+      // Assets-only project (a static site): `wrangler.json` declares an
+      // assets directory and there is no server entry. Wrangler deploys this
+      // shape as an assets-only Worker; `createApp` cannot, because it always
+      // bundles a server entry and throws "Could not determine server entry
+      // point" when there is none. Ship the assets with no server modules.
+      bundle = {
+        mainModule: ASSETS_ONLY_MAIN_MODULE,
+        modules: {},
+        assets: collectedAssets,
+        assetConfig,
+        compatibilityDate,
+      }
+    } else if (Object.keys(collectedAssets).length) {
       const result = await createApp({
         files,
         assets: collectedAssets,
         assetConfig,
-        server: wranglerCfg.main,
+        server: serverEntry,
       })
-      return {
-        branch,
-        commitHash,
+      bundle = {
         mainModule: result.mainModule,
         modules: serializeModules(result.modules),
         assets: serializeAssets(result.assets),
         assetConfig: result.assetConfig,
-        compatibilityDate: wranglerCfg.compatibilityDate ?? "2025-04-01",
+        compatibilityDate,
       }
-    }
-
-    const result = await createWorker({ files, entryPoint: wranglerCfg.main })
-    const modules = serializeModules(result.modules)
-    modules["__STATIC_CONTENT_MANIFEST"] ??= { text: "{}" }
-    return {
-      branch,
-      commitHash,
-      mainModule: result.mainModule,
-      modules,
-      assets: {},
-      assetConfig,
-      compatibilityDate: wranglerCfg.compatibilityDate ?? "2025-04-01",
+    } else {
+      const result = await createWorker({ files, entryPoint: wranglerCfg.main })
+      const modules = serializeModules(result.modules)
+      modules["__STATIC_CONTENT_MANIFEST"] ??= { text: "{}" }
+      bundle = {
+        mainModule: result.mainModule,
+        modules,
+        assets: {},
+        assetConfig,
+        compatibilityDate,
+      }
     }
   } catch (e) {
     throw new Error(`Build failed: ${e instanceof Error ? e.message : String(e)}`)
   }
+
+  if (options.renderMode === "static") {
+    const report = checkStaticHtml(bundle.assets)
+    if (report.problems.length > 0) {
+      throw new Error(
+        `Static HTML check failed: This space renders static HTML, so every page must be readable without JavaScript. ${report.problems.join("; ")}`
+      )
+    }
+    if (report.warnings.length > 0) bundle.warnings = report.warnings
+  }
+
+  return bundle
 }
 
 // ─── Get a deployment ───────────────────────────────────────────────────────

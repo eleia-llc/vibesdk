@@ -91,6 +91,41 @@ describe('deployThinkBundleToPlatform', () => {
 	});
 });
 
+describe('deployThinkBundleToPlatform: assets-only static site', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('publishes an assets-only bundle with a generated asset-serving entry and no App', async () => {
+		const result = await deployThinkBundleToPlatform({
+			accountId: 'platform-account',
+			apiToken: 'platform-token',
+			dispatchNamespace: 'vibesdk-default-namespace',
+			previewDomain: 'build-preview.cloudflare.dev',
+			appName: 'Arepas La Mona',
+			bundle: makeBundle({
+				mainModule: '',
+				modules: {},
+				assets: { '/index.html': '<h1>Arepas</h1>', '/styles.css': 'h1{}' },
+				assetConfig: { not_found_handling: 'single-page-application' },
+			}),
+		});
+
+		expect(result.deploymentId).toBe('arepas-la-mona');
+		expect(deployWithAssets).toHaveBeenCalledTimes(1);
+		const [, entry, , manifest, , bindings, , namespace, assetsConfig, modules, , migrations] =
+			deployWithAssets.mock.calls[0];
+		expect(Object.keys(manifest).sort()).toEqual(['/index.html', '/styles.css']);
+		expect(entry).toContain('env.ASSETS.fetch(request)');
+		expect(entry).not.toMatch(/from "\.\//);
+		expect(bindings).toEqual([{ name: 'ASSETS', type: 'assets' }]);
+		expect(namespace).toBe('vibesdk-default-namespace');
+		expect(assetsConfig).toMatchObject({ binding: 'ASSETS', not_found_handling: 'single-page-application' });
+		expect([...modules.keys()]).toEqual([]);
+		expect(migrations).toBeUndefined();
+	});
+});
+
 describe('deployThinkBundleToUserAccount', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();

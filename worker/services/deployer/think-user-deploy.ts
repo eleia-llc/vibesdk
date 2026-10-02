@@ -41,6 +41,11 @@ export function sanitizeWorkerName(value: string): string {
 	return normalized || 'vibe-app';
 }
 
+/** Matches `ASSETS_ONLY_MAIN_MODULE` in `space/src/space/deploy-engine.ts`. */
+function isAssetsOnlyBundle(bundle: BranchDeploymentBundle): boolean {
+	return bundle.mainModule === '';
+}
+
 function exportsApp(moduleSource: string): boolean {
 	return /export\s+(?:declare\s+)?class\s+App\b/.test(moduleSource)
 		|| /export\s*\{[^}]*\bApp\b[^}]*\}/s.test(moduleSource)
@@ -82,11 +87,17 @@ async function buildThinkBundleArtifacts(
 	for (const [name, value] of Object.entries(bundle.modules)) {
 		modules.set(name, normalizeModule(value));
 	}
-	const mainModuleSource = modules.get(bundle.mainModule);
-	if (!mainModuleSource) {
-		throw new Error(`Generated Worker entry module not found: ${bundle.mainModule}`);
+	// An assets-only bundle (static site, no server entry) has no modules: the
+	// generated entry below only serves `ASSETS`.
+	const assetsOnly = isAssetsOnlyBundle(bundle);
+	let hasApp = false;
+	if (!assetsOnly) {
+		const mainModuleSource = modules.get(bundle.mainModule);
+		if (!mainModuleSource) {
+			throw new Error(`Generated Worker entry module not found: ${bundle.mainModule}`);
+		}
+		hasApp = exportsApp(mainModuleSource);
 	}
-	const hasApp = exportsApp(mainModuleSource);
 
 	const assetBuffers = new Map<string, ArrayBuffer>();
 	const assetContents = new Map<string, Buffer>();

@@ -8,6 +8,7 @@ export type {
   AppDatabaseReadResult,
 } from "./space/durable-object"
 export type { BranchDeploymentBundle } from "./space/deploy-engine"
+export type { RenderMode } from "./space/static-html"
 
 // ── Environment bindings type ────────────────────────────────────
 export type { Env } from "./env"

@@ -44,6 +44,7 @@ export interface AppDatabaseReadResult {
 export interface BranchDeploymentBundle {
 	branch: string;
 	commitHash: string;
+	/** Server entry module name, or `""` for an assets-only deployment (static site). */
 	mainModule: string;
 	modules: Record<string, string | Record<string, unknown>>;
 	assets: Record<string, string>;
@@ -52,7 +53,15 @@ export interface BranchDeploymentBundle {
 		not_found_handling?: 'single-page-application' | '404-page' | 'none';
 	};
 	compatibilityDate: string;
+	/** Non-blocking build notes (e.g. static HTML link-preview recommendations). */
+	warnings?: string[];
 }
+
+/**
+ * How a space's pages are rendered. `static` requires every deployed HTML
+ * page to be readable without JavaScript; `spa` is the default.
+ */
+export type RenderMode = 'spa' | 'static';
 
 // ── Env shape (minimum). The host worker's Env satisfies this. ─────────────
 export interface Env {

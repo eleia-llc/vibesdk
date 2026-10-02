@@ -5,9 +5,11 @@ import type { Env } from "../env"
 import {
   buildBranchDeployment,
   handleDeployCommand,
+  isAssetsOnlyDeployment,
   type BranchDeploymentBundle,
   type DeployContext,
 } from "./deploy-engine"
+import { isRenderMode, type RenderMode } from "./static-html"
 import { globInfos, readDirInfos, toFileInfo, writeTextFile } from "./fileinfo"
 import { handleAssetRequest, buildAssetManifest, createMemoryStorage, type AssetConfig } from "@cloudflare/worker-bundler"
 import {
@@ -139,6 +141,15 @@ export class SpaceDO extends DurableObject<Env> {
         assets TEXT NOT NULL DEFAULT '{}',
         asset_config TEXT NOT NULL DEFAULT '{}',
         deployed_at INTEGER NOT NULL
+      )
+    `)
+
+    // Space-level settings that must not live in the (agent-editable) tree,
+    // such as the render mode the space was created with.
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS space_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
       )
     `)
 
@@ -522,6 +533,36 @@ export class SpaceDO extends DurableObject<Env> {
     return this.deploy(branch)
   }
 
+  // ── Render mode ─────────────────────────────────────────────────
+  //
+  // Recorded once by the host when the session is created. Every deploy and
+  // publish bundle of this space is checked against it (see `static-html.ts`).
+
+  async setRenderMode(mode: RenderMode): Promise<{ renderMode: RenderMode }> {
+    await this.ensureInit()
+    if (!isRenderMode(mode)) {
+      throw new Error(`Unknown render mode "${String(mode)}"`)
+    }
+    this.ctx.storage.sql.exec(
+      "INSERT OR REPLACE INTO space_settings (key, value) VALUES ('render_mode', ?)",
+      mode,
+    )
+    return { renderMode: mode }
+  }
+
+  async getRenderMode(): Promise<RenderMode> {
+    await this.ensureInit()
+    return this.readRenderMode()
+  }
+
+  private readRenderMode(): RenderMode {
+    const rows = this.ctx.storage.sql
+      .exec("SELECT value FROM space_settings WHERE key = 'render_mode'")
+      .toArray()
+    const value = rows[0]?.value
+    return isRenderMode(value) ? value : "spa"
+  }
+
   // ── Deploy RPC methods ──────────────────────────────────────────
 
   async deploy(branch: string): Promise<unknown> {
@@ -533,7 +574,7 @@ export class SpaceDO extends DurableObject<Env> {
     const fakeRequest = new Request("http://internal/?cmd=deploy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branch }),
+      body: JSON.stringify({ branch, renderMode: this.readRenderMode() }),
     })
     const ctx: DeployContext = {
       sql: this.ctx.storage.sql,
@@ -560,6 +601,7 @@ export class SpaceDO extends DurableObject<Env> {
         fs: this.fs,
       },
       branch,
+      { renderMode: this.readRenderMode() },
     )
   }
 
@@ -682,6 +724,11 @@ export class SpaceDO extends DurableObject<Env> {
       if (assetResponse) return assetResponse
     }
 
+    // Assets-only deployment (static site): there is no App to forward to.
+    if (isAssetsOnlyDeployment(dep)) {
+      return new Response("Not Found", { status: 404 })
+    }
+
     let appClass: DurableObjectClass
     try {
       appClass = this.loadAppClass(dep)
@@ -765,11 +812,12 @@ export class SpaceDO extends DurableObject<Env> {
    * the dynamic worker, wrapping the App class) on first call. Used by
    * the DB-viewer inspector RPCs.
    *
-   * Returns `null` if there is no deployment yet for the branch.
+   * Returns `null` if there is no deployment yet for the branch, or if the
+   * deployment is assets-only (a static site has no App).
    */
   private getAppFacet(branch: string): Fetcher | null {
     const dep = this.readDeployment(branch)
-    if (!dep) return null
+    if (!dep || isAssetsOnlyDeployment(dep)) return null
     const cls = this.loadAppClass(dep)
     return this.ctx.facets.get(facetNameForApp(branch), () => ({ class: cls })) as unknown as Fetcher
   }

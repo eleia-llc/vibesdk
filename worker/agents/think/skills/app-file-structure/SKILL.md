@@ -11,7 +11,7 @@ When `deploy_space(branch)` is called, the space DO:
 
 1. Reads every file from the branch's working tree (skipping `.git/`).
 2. Parses `wrangler.json` / `wrangler.jsonc` / `wrangler.toml` for `main`, `compatibility_date`, `compatibility_flags`, and `[assets]`.
-3. If `[assets].directory` is set, files under that directory become static assets served host-side by `handleAssetRequest`. Everything else is built into a Worker via `createApp` (with `server: <main>`).
+3. If `[assets].directory` is set, files under that directory become static assets served host-side by `handleAssetRequest`. If there is also a server entry (`main`, or one of `src/index.ts`, `src/index.js`, `index.ts`, `index.js`), everything else is built into a Worker via `createApp` (with `server: <main>`). With no server entry the deploy is assets-only: no Worker is built, and requests that match no asset get `not_found_handling` (or a 404).
 4. If no assets directory is configured, only `createWorker({ entryPoint: <main> })` is run. The output is loaded as a Dynamic Worker; all requests go to the Worker.
 5. Previews are served at `/space/:name/preview/:branch/*`. Responses with `content-type: text/html` are run through `HTMLRewriter`, which prefixes root-relative `src` / `href` / `action` attributes with the preview base path. **JS-side fetches and dynamic imports are NOT rewritten.**
 
@@ -37,7 +37,7 @@ A typical full-stack space project:
     └── styles.css
 ```
 
-A static-only SPA can skip `src/` entirely — just `wrangler.json` + `public/` is enough as long as `main` points to a minimal pass-through worker or you accept that all requests fall through assets.
+A static site can skip `src/` entirely: `wrangler.json` with `[assets]` and no `main`, plus the files in `public/`, deploys as an assets-only app. Do not add a pass-through Worker just to make it build. For landings that must be readable without JavaScript (SEO, link previews), follow the `static-html-site` skill.
 
 ## Wrangler config
 
@@ -57,7 +57,7 @@ Minimum viable `wrangler.json`:
 
 Notes:
 
-- `main` is required when there's any server code. The bundler also auto-detects `src/index.ts`, `src/index.js`, `index.ts`, `index.js` if missing.
+- `main` is required when there's any server code. The bundler also auto-detects `src/index.ts`, `src/index.js`, `index.ts`, `index.js` if missing. Omit `main` (and those files) for a pure static site.
 - `compatibility_date` defaults to `2025-04-01` if omitted. Set it explicitly for newer features.
 - Add `"compatibility_flags": ["nodejs_compat"]` only if you actually need Node built-ins.
 - `assets.directory` is the **only** way to ship static files. Files outside this directory are bundled into the Worker or ignored — they will **not** be reachable via URL.
@@ -379,7 +379,7 @@ Safe and well-tested deps: `hono`, `zod`, `itty-router`, `nanoid`, `valibot`, `@
 
 Run through every item — most "preview is broken" reports trace back to one of these.
 
-- `wrangler.json` exists at repo root with `main` and (if static assets exist) `[assets].directory`.
+- `wrangler.json` exists at repo root (write it as `/wrangler.json`) with `main` when there is server code and `[assets].directory` when there are static assets. A pure static site has no `main`.
 - Every browser-loaded `.js` / `.mjs` / `<script type="module">` is **plain JS, no JSX**, or wrapped with `@babel/standalone` + `type="text/babel"`.
 - If you use React via importmap (Babel-standalone or pre-compiled with the automatic JSX runtime), the importmap maps **all** of `react`, `react/jsx-runtime`, `react-dom`, and `react-dom/client` — same version on every entry. Missing `react/jsx-runtime` produces `Failed to resolve module specifier "react/jsx-runtime"` and a blank page.
 - The `<script type="importmap">` tag appears **before** any `<script type="module">` (or `type="text/babel" data-type="module"`) that depends on the mapped specifiers.
