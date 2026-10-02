@@ -31,6 +31,7 @@ import type { ThinkAgentConfig } from '../../think/ThinkAgent';
 import { withDurableObjectResetRetry } from '../../think/space-workspace-ops';
 import { formatThinkModelId, resolveThinkModel, resolveThinkReasoningEffort } from '../../think/model-config';
 import type { BranchDeploymentBundle } from '@space-do/space';
+import type { RenderMode } from '../types';
 import { CloudflareAccountService } from '../../../services/cloudflare/CloudflareAccountService';
 import { deployThinkBundleToPlatform, deployThinkBundleToUserAccount } from '../../../services/deployer/think-user-deploy';
 import { resolveCloudflareAccessToken } from '../../../services/rate-limit/usageChecker';
@@ -60,6 +61,7 @@ type SpaceRpcStub = {
 		branch: string,
 	) => Promise<{ preview_url?: string; commit_hash?: string; error?: string; details?: string }>;
 	getDeploymentBundle: (branch: string) => Promise<BranchDeploymentBundle>;
+	setRenderMode: (mode: RenderMode) => Promise<{ renderMode: RenderMode }>;
 	rollbackToCommit: (branch: string, commitHash: string) => Promise<unknown>;
 };
 
@@ -162,6 +164,7 @@ export class ThinkCodingBehavior
 		// Think projects are template-free: SpaceDO + the agent's own file tools
 		// own scaffolding entirely. We intentionally ignore `templateInfo`.
 		const { query, hostname, inferenceContext, sandboxSessionId } = initArgs;
+		const renderMode: RenderMode = initArgs.renderMode ?? 'spa';
 
 		const baseName = (query || 'project').toString();
 		const projectName = generateProjectName(
@@ -195,6 +198,7 @@ export class ThinkCodingBehavior
 			behaviorType: 'think',
 			thinkAgentName: agentName,
 			currentBranch: 'main',
+			renderMode,
 		});
 
 		const configureStartedAt = performance.now();
@@ -203,6 +207,12 @@ export class ThinkCodingBehavior
 
 		const seedStartedAt = performance.now();
 		await this.seedEmptySpace();
+		// The SpaceDO enforces the render mode on every preview deploy and
+		// publish bundle. A static request that cannot be recorded must fail
+		// session creation rather than silently produce an unchecked SPA.
+		if (renderMode !== 'spa') {
+			await this.callSpace((space) => space.setRenderMode(renderMode));
+		}
 		const seedDurationMs = performance.now() - seedStartedAt;
 
 		this.logger.info(
@@ -343,9 +353,29 @@ export class ThinkCodingBehavior
 			'3. If the deploy reports build errors or the console shows errors, fix the code and repeat from step 1 until the deploy succeeds and the console is clean.',
 			'A building turn should finish with a successful `deploy_space` and a clean `get_browser_console_logs` check.',
 			'',
+			...this.buildRenderModePrompt(),
 			'## Commits & restore points',
 			'Each commit is a restore point the user can roll back to, and YOU decide when to create them. Use the `commit` tool to snapshot a coherent unit of work with a short, descriptive message (e.g. before a risky refactor, or after finishing a feature). You do not need to `commit` right before `deploy_space` — deploying already commits. Do not commit after every tiny edit; group related changes into meaningful restore points.',
 		].join('\n');
+	}
+
+	/**
+	 * Extra system-prompt section for a non-default render mode. The SpaceDO
+	 * enforces the same contract at deploy time (`checkStaticHtml`), so the
+	 * prompt and the build agree on what "static" means.
+	 */
+	private buildRenderModePrompt(): string[] {
+		if (this.state.renderMode !== 'static') return [];
+		return [
+			'## Rendering: static HTML (required for this project)',
+			'This project was requested in static render mode: search engines and link previews (WhatsApp, Slack, social networks) must read the full page from the HTML without running JavaScript.',
+			'- Activate the `static-html-site` skill before writing files and follow it.',
+			'- Write every page as complete HTML in the assets directory (`public/`): real headings, copy, links and images are in the markup. Do not render content from JavaScript, and do not ship a React/Vue/Svelte SPA whose HTML is an empty mount point such as `<div id="root"></div>`.',
+			'- Every page needs a `<title>`, `<meta name="description">`, `og:title`, `og:description` and `og:type`, plus `og:image` when an image is available.',
+			'- JavaScript is allowed only to enhance content that is already in the HTML (menus, animations, form submission).',
+			'- `deploy_space` fails with "Static HTML check failed" when a page breaks these rules; read the listed problems, fix the HTML and redeploy.',
+			'',
+		];
 	}
 
 	/**

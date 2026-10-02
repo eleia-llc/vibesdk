@@ -1,6 +1,7 @@
 import type {
 	BehaviorType as PlatformBehaviorType,
 	ProjectType as PlatformProjectType,
+	RenderMode,
 	PlatformCodeGenArgs,
 	WebSocketMessage,
 	ImageAttachment as PlatformImageAttachment,
@@ -49,6 +50,7 @@ type Serialized<T> = T extends Date
 
 export type BehaviorType = PlatformBehaviorType;
 export type ProjectType = PlatformProjectType;
+export type { RenderMode };
 export type ImageAttachment = PlatformImageAttachment;
 export type AgentState = PlatformAgentState;
 
@@ -70,6 +72,8 @@ export type BuildStartEvent = {
 	httpStatusUrl?: string;
 	behaviorType?: BehaviorType;
 	projectType?: string;
+	/** Render mode the platform recorded for a think session (`spa` or `static`). */
+	renderMode?: RenderMode;
 	template?: { name: string; files?: TemplateFiles };
 };
 

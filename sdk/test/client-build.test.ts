@@ -74,4 +74,38 @@ describe('VibeClient.build', () => {
 		expect(calls[0]?.url.endsWith('/api/auth/exchange-api-key')).toBe(true);
 		expect(calls[1]?.url.endsWith('/api/agent')).toBe(true);
 	});
+
+	it('forwards renderMode to /api/agent', async () => {
+		let body: Record<string, unknown> = {};
+		const { fetchFn } = createFetchMock(async ({ url, init }) => {
+			if (url.endsWith('/api/agent')) {
+				body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+				const ndjson =
+					JSON.stringify({
+						agentId: 'a2',
+						websocketUrl: 'ws://x/ws',
+						behaviorType: 'think',
+						projectType: 'app',
+						renderMode: 'static',
+					}) + '\n';
+				return new Response(streamFromString(ndjson), {
+					status: 200,
+					headers: { 'Content-Type': 'text/event-stream' },
+				});
+			}
+			return new Response('not found', { status: 404 });
+		});
+
+		const client = new VibeClient({ baseUrl: 'http://localhost:5173', token: 'ACCESS_TOKEN', fetchFn });
+		const session = await client.build('Landing para arepas', {
+			autoConnect: false,
+			autoGenerate: false,
+			behaviorType: 'think',
+			renderMode: 'static',
+		});
+
+		expect(body.renderMode).toBe('static');
+		expect(body.behaviorType).toBe('think');
+		expect(session.agentId).toBe('a2');
+	});
 });

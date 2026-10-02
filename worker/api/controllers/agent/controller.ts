@@ -10,6 +10,8 @@ import {
     AgentPreviewResponse,
     CodeGenArgs,
     MAX_AGENT_QUERY_LENGTH,
+    validateRenderMode,
+    type RenderMode,
 } from './types';
 import { SecurityError, SecurityErrorType } from 'shared/types/errors';
 import { ApiResponse, ControllerResponse } from '../types';
@@ -45,6 +47,7 @@ const resolveBehaviorType = (body: CodeGenArgs): BehaviorType => {
 const resolveProjectType = (body: CodeGenArgs): ProjectType | 'auto' => {
     return body.projectType || 'auto';
 };
+
 
 
 /**
@@ -83,6 +86,11 @@ export class CodingAgentController extends BaseController {
                     413,
                 );
             }
+            const renderModeError = validateRenderMode(body.renderMode, resolveBehaviorType(body));
+            if (renderModeError) {
+                return CodingAgentController.createErrorResponse(renderModeError, 400);
+            }
+            const renderMode: RenderMode = body.renderMode ?? 'spa';
             const { readable, writable } = new TransformStream({
                 transform(chunk, controller) {
                     if (chunk === "terminate") {
@@ -228,6 +236,7 @@ export class CodingAgentController extends BaseController {
                 httpStatusUrl,
                 behaviorType,
                 projectType: finalProjectType,
+                ...(isThink && { renderMode }),
                 template: isThink
                     ? { name: 'think', files: [] }
                     : {
@@ -250,7 +259,7 @@ export class CodingAgentController extends BaseController {
             } as const;
 
             const initArgs = isThink
-                ? baseInitArgs
+                ? { ...baseInitArgs, renderMode }
                 : { ...baseInitArgs, templateInfo: { templateDetails: templateResult!.templateDetails, selection: templateResult!.selection } };
 
             const agentPromise = agentInstance.initialize(initArgs) as Promise<AgentState>;

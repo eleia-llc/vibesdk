@@ -42,6 +42,7 @@ export type {
 	PhaseTimelineEvent,
 	ProjectType,
 	PublicAppsQuery,
+	RenderMode,
 	SessionDeployable,
 	SessionFiles,
 	SessionPhases,
