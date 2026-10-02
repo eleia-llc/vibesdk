@@ -61,7 +61,7 @@ Notes:
 - `compatibility_date` defaults to `2025-04-01` if omitted. Set it explicitly for newer features.
 - Add `"compatibility_flags": ["nodejs_compat"]` only if you actually need Node built-ins.
 - `assets.directory` is the **only** way to ship static files. Files outside this directory are bundled into the Worker or ignored — they will **not** be reachable via URL.
-- `html_handling: "auto-trailing-slash"` is usually what you want for multi-page sites; SPAs should also set `not_found_handling: "single-page-application"` so deep links return `index.html`.
+- `html_handling: "auto-trailing-slash"` is usually what you want for multi-page sites; SPAs should also set `not_found_handling: "single-page-application"` so deep links return `index.html`. With `not_found_handling: "404-page"` the assets directory must contain a `404.html`; `deploy_space` fails without it.
 
 TOML works too (`wrangler.toml`), but the parser only handles top-level scalar fields plus an `[assets]` table — no inline tables, no env overrides. Prefer JSON.
 

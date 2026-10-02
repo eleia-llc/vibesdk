@@ -170,3 +170,69 @@ function parseAttributes(source: string): Record<string, string> {
   }
   return attrs
 }
+
+// ─── Not-found page ──────────────────────────────────────────────────────────
+//
+// With `not_found_handling: "404-page"` the asset server answers a URL that
+// matches no asset with the nearest `404.html` and status 404 (the preview's
+// `handleAssetRequest` and the Workers for Platforms asset platform behave the
+// same). If the site ships no `404.html` both fall through to a bare
+// "Not Found" text response, so the page is required whenever the config
+// promises it. A static site must also use `404-page`: `single-page-application`
+// answers every unknown URL with the landing and status 200 (a soft 404 for
+// crawlers), and no handling at all gives the bare text response.
+
+export interface NotFoundPageOptions {
+  /** `not_found_handling` from wrangler.json, if any. */
+  notFoundHandling?: string
+  /** Render mode recorded for the space. */
+  renderMode?: RenderMode
+  /** Assets directory as written in wrangler.json (e.g. `public`), for messages. */
+  assetsDirectory?: string
+}
+
+export function checkNotFoundPage(
+  assets: Record<string, string>,
+  options: NotFoundPageOptions = {},
+): string[] {
+  const problems: string[] = []
+  const dir = (options.assetsDirectory ?? "public").replace(/^\.?\//, "").replace(/\/$/, "")
+  const fileOnDisk = `${dir}/404.html`
+  const isStatic = options.renderMode === "static"
+  const uses404Page = options.notFoundHandling === "404-page"
+
+  if (isStatic && !uses404Page) {
+    const current = options.notFoundHandling ? `"${options.notFoundHandling}"` : "not set"
+    problems.push(
+      `wrangler.json: assets.not_found_handling is ${current}. A static site must set it to "404-page" so unknown URLs ` +
+        `get ${fileOnDisk} with status 404 (` +
+        (options.notFoundHandling === "single-page-application"
+          ? `"single-page-application" answers every unknown URL with the landing and status 200`
+          : `without it unknown URLs get a bare "Not Found" text`) +
+        `)`,
+    )
+  }
+
+  if (!isStatic && !uses404Page) return problems
+
+  const page = assets["/404.html"]
+  if (page === undefined) {
+    problems.push(
+      `${fileOnDisk}: missing. wrangler.json sets assets.not_found_handling to "404-page", which answers unknown URLs ` +
+        `with /404.html and status 404; without the file visitors and crawlers get a bare "Not Found" text. ` +
+        `Write ${fileOnDisk} as a complete HTML page with a <title>, a short message and a link back to /`,
+    )
+    return problems
+  }
+
+  const withoutComments = page.replace(/<!--[\s\S]*?-->/g, "")
+  const head = extractElementInner(withoutComments, "head") ?? ""
+  const body = extractElementInner(withoutComments, "body") ?? withoutComments
+  if (!textOf(extractElementInner(head, "title") ?? "")) {
+    problems.push(`${fileOnDisk}: missing a non-empty <title> in <head>`)
+  }
+  if (!textOf(stripNonContent(body))) {
+    problems.push(`${fileOnDisk}: has no visible text. Tell the visitor the page does not exist and link back to /`)
+  }
+  return problems
+}

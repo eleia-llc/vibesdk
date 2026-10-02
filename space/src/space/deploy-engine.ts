@@ -3,7 +3,7 @@ import type { FileSystem } from "@cloudflare/shell"
 import { createApp, createWorker, type AssetConfig, type Modules } from "@cloudflare/worker-bundler"
 import { parseWranglerConfig, WranglerConfigError, type ParsedWranglerConfig } from "./wrangler-config"
 import { globInfos } from "./fileinfo"
-import { checkStaticHtml, type RenderMode } from "./static-html"
+import { checkNotFoundPage, checkStaticHtml, type RenderMode } from "./static-html"
 
 // ─── Deploy Engine ──────────────────────────────────────────────────────────
 
@@ -310,14 +310,26 @@ export async function buildDeploymentFromFiles(
     throw new Error(`Build failed: ${e instanceof Error ? e.message : String(e)}`)
   }
 
+  const hasAssets = Object.keys(bundle.assets).length > 0
+  const notFoundProblems = hasAssets
+    ? checkNotFoundPage(bundle.assets, {
+        notFoundHandling: bundle.assetConfig?.not_found_handling,
+        renderMode: options.renderMode,
+        assetsDirectory: wranglerCfg.assets?.directory,
+      })
+    : []
+
   if (options.renderMode === "static") {
     const report = checkStaticHtml(bundle.assets)
-    if (report.problems.length > 0) {
+    const problems = [...report.problems, ...notFoundProblems]
+    if (problems.length > 0) {
       throw new Error(
-        `Static HTML check failed: This space renders static HTML, so every page must be readable without JavaScript. ${report.problems.join("; ")}`
+        `Static HTML check failed: This space renders static HTML, so every page must be readable without JavaScript and unknown URLs must get a real 404 page. ${problems.join("; ")}`
       )
     }
     if (report.warnings.length > 0) bundle.warnings = report.warnings
+  } else if (notFoundProblems.length > 0) {
+    throw new Error(`404 page check failed: ${notFoundProblems.join("; ")}`)
   }
 
   return bundle

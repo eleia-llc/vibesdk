@@ -40,6 +40,15 @@ const STATIC_WRANGLER = JSON.stringify({
   },
 })
 
+// What the static-html-site skill tells the agent to write.
+const STATIC_404_WRANGLER = JSON.stringify({
+  compatibility_date: "2025-04-01",
+  assets: { directory: "./public", html_handling: "auto-trailing-slash", not_found_handling: "404-page" },
+})
+
+const NOT_FOUND_PAGE =
+  '<!doctype html><html lang="es"><head><title>Página no encontrada</title></head><body><h1>Esta página no existe</h1><a href="/">Volver</a></body></html>'
+
 describe("buildDeploymentFromFiles: static site (no server entry)", () => {
   it("builds an assets-only deployment instead of failing to find a server entry", async () => {
     const bundle = await buildDeploymentFromFiles({
@@ -124,7 +133,7 @@ describe("buildDeploymentFromFiles: static render mode", () => {
   })
 
   it("passes a static landing and does not check SPA-mode builds", async () => {
-    const files = { "wrangler.json": STATIC_WRANGLER, "public/index.html": LANDING }
+    const files = { "wrangler.json": STATIC_404_WRANGLER, "public/index.html": LANDING, "public/404.html": NOT_FOUND_PAGE }
     const bundle = await buildDeploymentFromFiles(files, { renderMode: "static" })
     expect(bundle.warnings).toBeUndefined()
 
@@ -135,5 +144,41 @@ describe("buildDeploymentFromFiles: static render mode", () => {
     await expect(buildDeploymentFromFiles(shell, { renderMode: "spa" })).resolves.toMatchObject({
       mainModule: ASSETS_ONLY_MAIN_MODULE,
     })
+  })
+})
+
+describe("buildDeploymentFromFiles: 404 page", () => {
+  // vibesdk-eval agent 2965b733 ("Panadería El Trigal", 2026-10-01): static
+  // mode, not_found_handling "404-page", no public/404.html. The deploy passed
+  // and /no-existe answered a bare "Not Found".
+  it("fails a static build that declares 404-page without public/404.html", async () => {
+    await expect(
+      buildDeploymentFromFiles(
+        { "wrangler.json": STATIC_404_WRANGLER, "public/index.html": LANDING },
+        { renderMode: "static" },
+      ),
+    ).rejects.toThrow(/^Static HTML check failed: .*public\/404\.html: missing\. .*Write public\/404\.html as a complete HTML page/)
+  })
+
+  it("fails a static build that uses SPA not-found handling", async () => {
+    await expect(
+      buildDeploymentFromFiles(
+        { "wrangler.json": STATIC_WRANGLER, "public/index.html": LANDING, "public/404.html": NOT_FOUND_PAGE },
+        { renderMode: "static" },
+      ),
+    ).rejects.toThrow(/assets\.not_found_handling is "single-page-application"\. A static site must set it to "404-page"/)
+  })
+
+  it("fails any build that declares 404-page without the page", async () => {
+    await expect(
+      buildDeploymentFromFiles({ "wrangler.json": STATIC_404_WRANGLER, "public/index.html": "<div id=root></div>" }),
+    ).rejects.toThrow(/^404 page check failed: public\/404\.html: missing\./)
+    await expect(
+      buildDeploymentFromFiles({
+        "wrangler.json": STATIC_404_WRANGLER,
+        "public/index.html": "<div id=root></div>",
+        "public/404.html": NOT_FOUND_PAGE,
+      }),
+    ).resolves.toMatchObject({ assetConfig: { not_found_handling: "404-page" } })
   })
 })

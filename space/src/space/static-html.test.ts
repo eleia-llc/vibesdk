@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { checkStaticHtml, isRenderMode } from "./static-html"
+import { checkNotFoundPage, checkStaticHtml, isRenderMode } from "./static-html"
 
 const COPY =
   "Arepas recién hechas en budare, rellenas al momento y empacadas para que lleguen calientes. " +
@@ -83,5 +83,64 @@ describe("isRenderMode", () => {
     expect(isRenderMode("spa")).toBe(true)
     expect(isRenderMode("ssr")).toBe(false)
     expect(isRenderMode(undefined)).toBe(false)
+  })
+})
+
+const NOT_FOUND_PAGE =
+  '<!doctype html><html lang="es"><head><title>Página no encontrada</title></head><body><h1>Esta página no existe</h1><a href="/">Volver al inicio</a></body></html>'
+
+describe("checkNotFoundPage", () => {
+  it("accepts a static site with 404-page and a 404.html", () => {
+    expect(
+      checkNotFoundPage(
+        { "/index.html": page(), "/404.html": NOT_FOUND_PAGE },
+        { renderMode: "static", notFoundHandling: "404-page", assetsDirectory: "./public" },
+      ),
+    ).toEqual([])
+  })
+
+  it("requires 404.html when not_found_handling is 404-page (the Panadería El Trigal build)", () => {
+    const problems = checkNotFoundPage(
+      { "/index.html": page() },
+      { renderMode: "static", notFoundHandling: "404-page", assetsDirectory: "./public" },
+    )
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toMatch(/^public\/404\.html: missing\. /)
+    expect(problems[0]).toContain('bare "Not Found" text')
+    expect(problems[0]).toContain("Write public/404.html")
+  })
+
+  it("requires 404.html for 404-page in SPA mode too, using the configured directory", () => {
+    expect(checkNotFoundPage({ "/index.html": "<html></html>" }, { notFoundHandling: "404-page", assetsDirectory: "dist/" })).toEqual([
+      expect.stringMatching(/^dist\/404\.html: missing\./),
+    ])
+  })
+
+  it("requires 404-page in static mode", () => {
+    const spa = checkNotFoundPage(
+      { "/index.html": page() },
+      { renderMode: "static", notFoundHandling: "single-page-application" },
+    )
+    expect(spa).toEqual([
+      expect.stringContaining('assets.not_found_handling is "single-page-application"'),
+      expect.stringContaining("public/404.html: missing."),
+    ])
+    expect(spa[0]).toContain("status 200")
+    const unset = checkNotFoundPage({ "/index.html": page(), "/404.html": NOT_FOUND_PAGE }, { renderMode: "static" })
+    expect(unset).toEqual([expect.stringContaining("assets.not_found_handling is not set")])
+  })
+
+  it("rejects an empty 404 page", () => {
+    expect(
+      checkNotFoundPage({ "/404.html": "<html><head></head><body><script>x()</script></body></html>" }, { notFoundHandling: "404-page" }),
+    ).toEqual([
+      "public/404.html: missing a non-empty <title> in <head>",
+      expect.stringContaining("public/404.html: has no visible text"),
+    ])
+  })
+
+  it("does not check sites that do not use 404-page outside static mode", () => {
+    expect(checkNotFoundPage({ "/index.html": "<div id=root></div>" }, { notFoundHandling: "single-page-application" })).toEqual([])
+    expect(checkNotFoundPage({ "/index.html": "<div id=root></div>" }, {})).toEqual([])
   })
 })

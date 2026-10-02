@@ -10,8 +10,9 @@ import {
   type DeployContext,
 } from "./deploy-engine"
 import { isRenderMode, type RenderMode } from "./static-html"
+import { servePreviewAssets } from "./preview-assets"
 import { globInfos, readDirInfos, toFileInfo, writeTextFile } from "./fileinfo"
-import { handleAssetRequest, buildAssetManifest, createMemoryStorage, type AssetConfig } from "@cloudflare/worker-bundler"
+import { buildAssetManifest, createMemoryStorage, type AssetConfig } from "@cloudflare/worker-bundler"
 import {
   buildInspectorWrapperSource,
   VIBE_APP_MODULE,
@@ -718,16 +719,9 @@ export class SpaceDO extends DurableObject<Env> {
     // Serve static assets host-side before forwarding to the Facet. The built
     // manifest/storage are cached per deployment so repeat asset reads don't
     // re-spin the build on every request.
-    if (Object.keys(dep.assets).length > 0) {
-      const { manifest, storage } = await this.getCachedAssets(dep)
-      const assetResponse = await handleAssetRequest(request, manifest, storage, dep.assetConfig)
-      if (assetResponse) return assetResponse
-    }
-
-    // Assets-only deployment (static site): there is no App to forward to.
-    if (isAssetsOnlyDeployment(dep)) {
-      return new Response("Not Found", { status: 404 })
-    }
+    // Assets-only deployments (static sites) end here: there is no App.
+    const assetResponse = await servePreviewAssets(request, dep, () => this.getCachedAssets(dep))
+    if (assetResponse) return assetResponse
 
     let appClass: DurableObjectClass
     try {

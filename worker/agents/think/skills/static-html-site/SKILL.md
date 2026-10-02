@@ -16,6 +16,7 @@ This is the "Pure static site" shape from `cloudflare-bundler-apps`: assets only
 ├── wrangler.json
 └── public/
     ├── index.html        # the landing, complete HTML
+    ├── 404.html          # required: served with status 404 for unknown URLs
     ├── styles.css
     └── app.js            # optional progressive enhancement
 ```
@@ -35,7 +36,7 @@ This is the "Pure static site" shape from `cloudflare-bundler-apps`: assets only
 
 - No `main` and no `src/index.ts`: the deploy ships the assets as an assets-only app.
 - Add `main` (an `App` Durable Object) only if the site needs a backend, for example a form endpoint. The pages stay static HTML either way.
-- Use `"404-page"` and a `public/404.html` for unknown paths. `single-page-application` is for client-routed apps and makes every unknown URL return the landing with status 200.
+- Always set `"not_found_handling": "404-page"` and write `public/404.html`: a complete page with a `<title>`, a short message and a link back to `/`. Unknown URLs then get that page with status 404. `single-page-application` is for client-routed apps and makes every unknown URL return the landing with status 200.
 - Write files with absolute paths (`/wrangler.json`, `/public/index.html`).
 
 ## Every page
@@ -99,5 +100,7 @@ In static render mode `deploy_space` checks every HTML page except `404.html` an
 - `<meta name="description">`, `og:title` and `og:description` with content
 - an `<h1>` with text
 - at least 200 characters of body text outside `<script>`, `<style>`, `<template>` and `<noscript>`
+
+It also fails when `wrangler.json` does not set `assets.not_found_handling` to `"404-page"`, or when `public/404.html` is missing, has no `<title>` or has no visible text. Any build that sets `"404-page"`, static or not, needs the `404.html`.
 
 Missing `og:type` or `og:image` is reported in `warnings` without failing. Fix the listed problems in the HTML and run `deploy_space` again.
